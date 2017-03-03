@@ -17,6 +17,7 @@ import (
 	"log"
 	"net"
 	"net/rpc"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -29,6 +30,8 @@ var (
 	samplesPerWorker 	 int = 5
 	workerRPCPort        int = 20000
 	workers              []Worker
+	domainWorkerMap      map[string]Worker
+	// for testing TODO eliminate
 	website string
 )
 
@@ -48,6 +51,12 @@ type LatencyReq struct {
 	Samples int
 }
 
+type CrawlPageReq struct {
+	Domain string
+	Url string
+	Depth int
+}
+
 
 func main() {
 
@@ -56,6 +65,8 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("workerIncomingIpPort:", workerIncomingIpPort, "clientIncomingIpPort:", clientIncomingIpPort)
+
+	domainWorkerMap = make(map[string]Worker)
 
 	go listenWorkers()
 
@@ -72,10 +83,46 @@ func test() {
 		// to allow azure to work...
 		time.Sleep(1 * time.Second)
 	}
-	
+
+	fmt.Println("Calling crawl(", website,"0)")
+	workerIp := crawl(website, 0)
+
+	fmt.Println("Used worker:", workerIp, "to crawl:", website)
+
+	fmt.Println("Bye bye...")
+}
+
+func crawl(url string, depth int) (workerIp string) {
 	worker := findClosestWorker(website)
 	fmt.Println("The closest worker is:", worker)
-	fmt.Println("Bye bye...")
+	fmt.Println("url:", url)
+	domain := getDomain(url)
+	fmt.Println("domain:", domain)
+	domainWorkerMap[domain] = worker
+	fmt.Println("domainWorkerMap:", domainWorkerMap)
+	crawlPage(worker, domain, url, depth)
+	workerIp = worker.Ip
+	return
+} 
+
+func crawlPage(worker Worker, domain string, url string, depth int) {
+	wIpPort := getWorkerIpPort(worker)
+	req := CrawlPageReq{domain, url, depth}
+	var resp bool
+	client, err := rpc.Dial("tcp", wIpPort)
+	checkError("rpc.Dial in crawlPage()", err, true)
+	err = client.Call("WorkerRPC.CrawlPage", req, &resp)
+	checkError("client.Call(WorkerRPC.CrawlPage: ", err, true)
+	err = client.Close()
+	checkError("client.Close() in crawlPage(): ", err, true)
+	return
+}
+
+func getDomain(uri string) (domain string) {
+	u, err := url.Parse(uri)
+    checkError("Error in getDomain(), url.Parse():", err, true)
+	domain = u.Host
+	return 
 }
 
 func findClosestWorker(url string) (worker Worker) {
@@ -141,7 +188,6 @@ func joinWorker(conn net.Conn) {
 // 	}
 // }
 
-// TODO rename Worker RPC to get latency and use better fields
 func getLatency(w Worker, url string) (latency int) {
 	wIpPort := getWorkerIpPort(w)
 	req := LatencyReq{url, samplesPerWorker}
@@ -164,6 +210,7 @@ func ParseArguments() (err error) {
 	if len(arguments) == 3 {
 		workerIncomingIpPort = arguments[0]
 		clientIncomingIpPort = arguments[1]
+		// for testing TODO eliminate
 		website = arguments[2]
 	} else {
 		err = fmt.Errorf("Usage: {go run server.go [worker-incoming ip:port] [client-incoming ip:port] [website]}")

@@ -18,7 +18,18 @@ import (
 var (
 	portForRPC string
 	serverIpPort     string
+	domains []Domain
 )
+
+type Domain struct {
+	Name string
+	Pages []Page
+}
+
+type Page struct {
+	Name string
+	Links []Page
+}
 
 type CrawlServer int
 
@@ -27,6 +38,12 @@ type WorkerRPC int
 type LatencyReq struct {
 	URI string
 	Samples int
+}
+
+type CrawlPageReq struct {
+	Domain string
+	Url string
+	Depth int
 }
 
 
@@ -47,9 +64,37 @@ func main() {
 }
 
 func (p *WorkerRPC) GetLatency(req LatencyReq, latency *int) error {
-	fmt.Println("received call to GetLatency")
+	fmt.Println("received call to GetLatency()")
 	*latency = getLatency(req)
 	return nil
+}
+
+func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
+	fmt.Println("received call to CrawlPage()")
+	crawlPage(req)
+	*success = true
+	return nil
+}
+
+func crawlPage(req CrawlPageReq) {
+	page := setNewDomain(req)
+	crawl(page, req.Depth)
+	return
+}
+
+func crawl(page Page, depth int) {
+	fmt.Println("Crawling:", page, "to depth:", depth)
+}
+
+func setNewDomain(req CrawlPageReq) (page Page) {
+	fmt.Println("domains:", domains)
+	var pages []Page
+	pages = append(pages, Page{req.Url, nil})
+	domains = append(domains, Domain{req.Domain, pages})
+	fmt.Println("domains after adding new domain:", domains)
+	// first page of latest domain added to domains
+	page = domains[len(domains) - 1].Pages[0]
+	return
 }
 
 func getLatency(req LatencyReq) (latency int) {
