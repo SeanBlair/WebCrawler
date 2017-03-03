@@ -57,15 +57,20 @@ func main() {
 	}
 	fmt.Println("workerIncomingIpPort:", workerIncomingIpPort, "clientIncomingIpPort:", clientIncomingIpPort)
 
-	// go listenClient()
 	go listenWorkers()
 
+	test()
+}
+
+func test() {
 	// for testing without client
 	for {
 		if len(workers) > 1 {
 			time.Sleep(2 * time.Second)
 			break
 		}
+		// to allow azure to work...
+		time.Sleep(1 * time.Second)
 	}
 	
 	worker := findClosestWorker(website)
