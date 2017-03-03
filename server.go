@@ -1,5 +1,5 @@
 /*
-Implements the server in assignment 4 for UBC CS 416 2016 W2.
+Implements the server in assignment 5 for UBC CS 416 2016 W2.
 
 Usage:
 
@@ -20,65 +20,34 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
 	workerIncomingIpPort string
 	clientIncomingIpPort string
+	samplesPerWorker 	 int = 5
 	workerRPCPort        int = 20000
-	Workers              []Worker
+	workers              []Worker
+	website string
 )
 
 type Worker struct {
 	Ip string
 }
 
-// A stats struct that summarizes a set of latency measurements to an
-// internet host.
-type LatencyStats struct {
-	Min    int // min measured latency in milliseconds to host
-	Median int // median measured latency in milliseconds to host
-	Max    int // max measured latency in milliseconds to host
+type WorkerLatency struct {
+	Worker Worker
+	Latency int
 }
 
-/////////////// RPC structs
+type WorkerRPC int 
 
-// Resource server type.
-type MServer int
-
-// Request that client sends in RPC call to MServer.MeasureWebsite
-type MWebsiteReq struct {
-	URI              string // URI of the website to measure
-	SamplesPerWorker int    // Number of samples, >= 1
+type LatencyReq struct {
+	URI string
+	Samples int
 }
 
-// Response to:
-// MServer.MeasureWebsite:
-//   - latency stats per worker to a *URI*
-//   - (optional) Diff map
-// MServer.GetWorkers
-//   - latency stats per worker to the *server*
-type MRes struct {
-	Stats map[string]LatencyStats    // map: workerIP -> LatencyStats
-	Diff  map[string]map[string]bool // map: [workerIP x workerIP] -> True/False
-}
-
-// Request that client sends in RPC call to MServer.GetWorkers
-type MWorkersReq struct {
-	SamplesPerWorker int // Number of samples, >= 1
-}
-
-type LatencyAndHash struct {
-	Stats    LatencyStats
-	SiteHash [16]byte
-}
-
-type WorkerIpAndSiteHash struct {
-	Ip   string
-	Hash [16]byte
-}
-
-/////////////// /RPC structs
 
 func main() {
 
@@ -88,19 +57,43 @@ func main() {
 	}
 	fmt.Println("workerIncomingIpPort:", workerIncomingIpPort, "clientIncomingIpPort:", clientIncomingIpPort)
 
-	go listenClient()
-	listenWorkers()
+	// go listenClient()
+	go listenWorkers()
+
+	// for testing without client
+	for {
+		if len(workers) > 1 {
+			time.Sleep(2 * time.Second)
+			break
+		}
+	}
+	
+	worker := findClosestWorker(website)
+	fmt.Println("The closest worker is:", worker)
+	fmt.Println("Bye bye...")
 }
 
-func (p *MServer) MeasureWebsite(mSiteReq MWebsiteReq, mRes *MRes) error {
-	*mRes = measureWebsite(mSiteReq)
-	return nil
+func findClosestWorker(url string) (worker Worker) {
+	var workerLatencyList []WorkerLatency 
+	for _, worker := range workers {
+		latency := getLatency(worker, url)
+		fmt.Println("Worker:", worker, "says latency is:", latency)
+		workerLatencyList = append(workerLatencyList, WorkerLatency{worker, latency})
+	}
+	worker = closestWorker(workerLatencyList)
+	return
 }
 
-func (p *MServer) GetWorkers(workerReq MWorkersReq, wRes *MRes) error {
-	*wRes = getWorkers(workerReq.SamplesPerWorker)
-	return nil
-}
+func closestWorker(workerLatencies []WorkerLatency) (worker Worker) {
+	workerLatency := workerLatencies[0]
+	for i:=1; i<len(workerLatencies); i++ {
+		if workerLatencies[i].Latency < workerLatency.Latency {
+			workerLatency = workerLatencies[i]	
+		}
+	}
+	return workerLatency.Worker
+} 
+
 
 func listenWorkers() {
 	ln, err := net.Listen("tcp", workerIncomingIpPort)
@@ -109,7 +102,7 @@ func listenWorkers() {
 		conn, err := ln.Accept()
 		checkError("Error in listenWorkers(), ln.Accept():", err, true)
 		joinWorker(conn)
-		fmt.Println("Worker joined. Workers:", Workers)
+		fmt.Println("Worker joined. Workers:", workers)
 	}
 }
 
@@ -119,130 +112,40 @@ func joinWorker(conn net.Conn) {
 
 	workerIp := workerIpPort[:strings.Index(workerIpPort, ":")]
 
-	Workers = append(Workers, Worker{workerIp})
-	// send to socket
+	workers = append(workers, Worker{workerIp})
+	
 	// TODO change to not require space delimiter
+	// send to socket
 	fmt.Fprintf(conn, strconv.Itoa(workerRPCPort)+" ")
 }
 
-func listenClient() {
-	mServer := rpc.NewServer()
-	m := new(MServer)
-	mServer.Register(m)
-	l, err := net.Listen("tcp", clientIncomingIpPort)
-	if err != nil {
-		panic(err)
-	}
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			panic(err)
-		}
-		go mServer.ServeConn(conn)
-	}
-}
+// func listenClient() {
+// 	mServer := rpc.NewServer()
+// 	m := new(MServer)
+// 	mServer.Register(m)
+// 	l, err := net.Listen("tcp", clientIncomingIpPort)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	for {
+// 		conn, err := l.Accept()
+// 		if err != nil {
+// 			panic(err)
+// 		}
+// 		go mServer.ServeConn(conn)
+// 	}
+// }
 
-func getWorkers(samples int) (res MRes) {
-	fmt.Println("GetWorkers called with samples:", samples)
-
-	res.Stats = make(map[string]LatencyStats)
-
-	for _, worker := range Workers {
-		go listenWorkerPing()
-		stats := pingServer(worker, samples)
-		res.Stats[worker.Ip] = stats
-		res.Diff = nil
-		fmt.Println("Received stats:", stats, "from worker:", worker)
-	}
-	return
-}
-
-func listenWorkerPing() {
-
-	workerIncoming, err := net.ResolveUDPAddr("udp", workerIncomingIpPort)
-	checkError("Error in listenWorkerPing(), net.ResolveUDPAddr():", err, true)
-
-	receivePingConn, err := net.ListenUDP("udp", workerIncoming)
-	checkError("Error in listenWorkerPing(), net.ListenUDP():", err, true)
-
-	for {
-		buffer := make([]byte, 10)
-		_, workerIpPort, err := receivePingConn.ReadFromUDP(buffer)
-		checkError("Error in listenWorkerPing(), receivePingConn.ReadFromUDP():", err, true)
-
-		fmt.Println("Received ping:", int(buffer[0]), " from:", workerIpPort)
-
-		// don't need an ack, simply return message
-		returnPingConn, err := net.DialUDP("udp", nil, workerIpPort)
-		// should allow error, consider as failed ping
-		checkError("Error in listenWorkerPing(), net.DialUDP():", err, false)
-
-		if err == nil {
-
-			_, err = returnPingConn.Write(buffer)
-			// should allow error, consider as failed ping
-			checkError("Error in listenWorkerPing(), receivePingConn.Write():", err, false)
-			returnPingConn.Close()
-			fmt.Println("Returned ping:", int(buffer[0]), "to worker:", workerIpPort)
-
-			// finished pinging...
-			if buffer[0] == 0 {
-				break
-			}
-		}
-	}
-
-	receivePingConn.Close()
-}
-
-func pingServer(w Worker, samples int) (st LatencyStats) {
+// TODO rename Worker RPC to get latency and use better fields
+func getLatency(w Worker, url string) (latency int) {
 	wIpPort := getWorkerIpPort(w)
+	req := LatencyReq{url, samplesPerWorker}
 	client, err := rpc.Dial("tcp", wIpPort)
-	checkError("rpc.Dial in pingServer()", err, true)
-	err = client.Call("WorkerServer.PingServer", samples, &st)
-	checkError("client.Call(WorkerServer.PingServer: ", err, true)
+	checkError("rpc.Dial in getLatency()", err, true)
+	err = client.Call("WorkerRPC.GetLatency", req, &latency)
+	checkError("client.Call(WorkerRPC.GetLatency: ", err, true)
 	err = client.Close()
-	checkError("client.Close() in pingServer call: ", err, true)
-	return
-}
-
-func measureWebsite(mSite MWebsiteReq) (res MRes) {
-	fmt.Println("Website to measure:", mSite.URI, "SamplesPerWorker:", mSite.SamplesPerWorker)
-
-	res.Stats = make(map[string]LatencyStats)
-	res.Diff = make(map[string]map[string]bool)
-
-	var workerHashes []WorkerIpAndSiteHash
-
-	for _, worker := range Workers {
-		latAndHash := pingSite(worker, mSite)
-		res.Stats[worker.Ip] = latAndHash.Stats
-		workerHashes = append(workerHashes, WorkerIpAndSiteHash{worker.Ip, latAndHash.SiteHash})
-	}
-
-	if len(workerHashes) > 1 {
-		for x, workerX := range workerHashes {
-			var workerXMap = make(map[string]bool)
-			for y, workerY := range workerHashes {
-				if x != y {
-					workerXMap[workerY.Ip] = (workerX.Hash != workerY.Hash)
-				}
-			}
-			res.Diff[workerX.Ip] = workerXMap
-		}
-	}
-
-	return
-}
-
-func pingSite(w Worker, req MWebsiteReq) (latAndHash LatencyAndHash) {
-	wIpPort := getWorkerIpPort(w)
-	client, err := rpc.Dial("tcp", wIpPort)
-	checkError("rpc.Dial in pingSite()", err, true)
-	err = client.Call("WorkerServer.PingSite", req, &latAndHash)
-	checkError("client.Call(WorkerServer.PingSite: ", err, true)
-	err = client.Close()
-	checkError("client.Close() in pingSite call: ", err, true)
+	checkError("client.Close() in getLatency call: ", err, true)
 	return
 }
 
@@ -253,11 +156,12 @@ func getWorkerIpPort(w Worker) (s string) {
 
 func ParseArguments() (err error) {
 	arguments := os.Args[1:]
-	if len(arguments) == 2 {
+	if len(arguments) == 3 {
 		workerIncomingIpPort = arguments[0]
 		clientIncomingIpPort = arguments[1]
+		website = arguments[2]
 	} else {
-		err = fmt.Errorf("Usage: {go run server.go [worker-incoming ip:port] [client-incoming ip:port]}")
+		err = fmt.Errorf("Usage: {go run server.go [worker-incoming ip:port] [client-incoming ip:port] [website]}")
 		return
 	}
 	return
