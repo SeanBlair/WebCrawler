@@ -76,7 +76,7 @@ func main() {
 func test() {
 	// for testing without client
 	for {
-		if len(workers) > 1 {
+		if len(workers) > 0 {
 			time.Sleep(2 * time.Second)
 			break
 		}

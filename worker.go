@@ -4,7 +4,7 @@ import (
 	"bufio"
 	// "crypto/md5"
 	"fmt"
-	// "io/ioutil"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	// "golang.org/x/net/html"
 )
 
 var (
@@ -78,13 +79,50 @@ func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 
 func crawlPage(req CrawlPageReq) {
 	page := setNewDomain(req)
-	crawl(page, req.Depth)
+	fmt.Println("setNewDomain() in crawlPage() returned:", page)
+	htmlString := getHtmlString(req.Url)
+	// setLinks(page, htmlString)
+	fmt.Println("getHtmlString() in crawlPage() returned:", htmlString)
 	return
 }
 
-func crawl(page Page, depth int) {
-	fmt.Println("Crawling:", page, "to depth:", depth)
+func getHtmlString(uri string) (htmlString string) {
+	res, err := http.Get(uri)
+	checkError("Error in getHtmlString(), http.Get():", err, true)
+	html, err := ioutil.ReadAll(res.Body)
+	res.Body.Close()
+	checkError("Error in getHtmlString(), ioutil.ReadAll()", err, true)
+	htmlString = string(html[:])
+	return
 }
+
+func setLinks(page Page, html string) {
+	fmt.Println("Setting links of page:", page)
+
+
+	fmt.Println("Page after setting links:", page)
+}
+
+// s := `<p>Links:</p><ul><li><a href="foo">Foo</a><li><a href="/bar/baz">BarBaz</a></ul>`
+// doc, err := html.Parse(strings.NewReader(s))
+// if err != nil {
+//     log.Fatal(err)
+// }
+// var f func(*html.Node)
+// f = func(n *html.Node) {
+//     if n.Type == html.ElementNode && n.Data == "a" {
+//         for _, a := range n.Attr {
+//             if a.Key == "href" {
+//                 fmt.Println(a.Val)
+//                 break
+//             }
+//         }
+//     }
+//     for c := n.FirstChild; c != nil; c = c.NextSibling {
+//         f(c)
+//     }
+// }
+// f(doc)
 
 func setNewDomain(req CrawlPageReq) (page Page) {
 	fmt.Println("domains:", domains)
