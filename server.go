@@ -31,8 +31,6 @@ var (
 	workerRPCPort        int = 20000
 	workers              []Worker
 	domainWorkerMap      map[string]Worker
-	// for testing TODO eliminate
-	// website string
 )
 
 type Worker struct {
@@ -143,10 +141,12 @@ func getWorkersIpList() (list []string) {
 }
 
 func crawl(req CrawlReq) (workerIp string) {
-	worker := findClosestWorker(req.URL)
-	fmt.Println("url:", req.URL)
 	domain := getDomain(req.URL)
 	fmt.Println("domain:", domain)
+	schemeAndDomain := getSchemeAndDomain(req.URL)
+	fmt.Println("schemeAndDomain:", schemeAndDomain)
+	worker := findClosestWorker(schemeAndDomain)
+	fmt.Println("url:", req.URL)
 	domainWorkerMap[domain] = worker
 	fmt.Println("domainWorkerMap:", domainWorkerMap)
 	go crawlPage(worker, domain, req)
@@ -172,6 +172,13 @@ func getDomain(uri string) (domain string) {
     checkError("Error in getDomain(), url.Parse():", err, true)
 	domain = u.Host
 	return 
+}
+
+func getSchemeAndDomain(uri string) (schemeAndDomain string) {
+	u, err := url.Parse(uri)
+    checkError("Error in getSchemeAndDomain(), url.Parse():", err, true)
+    schemeAndDomain = u.Scheme + "://" + u.Host
+    return
 }
 
 func findClosestWorker(url string) (worker Worker) {
