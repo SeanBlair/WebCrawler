@@ -44,6 +44,8 @@ type WorkerLatency struct {
 	Latency int
 }
 
+type CrawlServer int
+
 type WorkerRPC int 
 
 type LatencyReq struct {
@@ -53,6 +55,11 @@ type LatencyReq struct {
 
 type CrawlPageReq struct {
 	Domain string
+	Url string
+	Depth int
+}
+
+type CrawlReq struct {
 	Url string
 	Depth int
 }
@@ -70,6 +77,8 @@ func main() {
 
 	go listenWorkers()
 
+	go listenClients()
+
 	test()
 }
 
@@ -85,29 +94,40 @@ func test() {
 	}
 
 	fmt.Println("Calling crawl(", website,"0)")
-	workerIp := crawl(website, 0)
+	// workerIp := crawl(website, 0)
+	workerIp := crawl(CrawlReq{website, 0})
 
 	fmt.Println("Used worker:", workerIp, "to crawl:", website)
 
 	fmt.Println("Bye bye...")
 }
 
-func crawl(url string, depth int) (workerIp string) {
-	worker := findClosestWorker(website)
+func (p *CrawlServer) Crawl(req CrawlReq, success *bool) error {
+	fmt.Println("received call to Crawl()")
+	// crawlPage(req)
+	workerOwnerIp := crawl(req)
+	// TODO will have to return workerOwnerIp to client
+	fmt.Println("workerOwnerIp:", workerOwnerIp) 
+	*success = true
+	return nil
+}
+
+func crawl(req CrawlReq) (workerIp string) {
+	worker := findClosestWorker(req.Url)
 	fmt.Println("The closest worker is:", worker)
-	fmt.Println("url:", url)
-	domain := getDomain(url)
+	fmt.Println("url:", req.Url)
+	domain := getDomain(req.Url)
 	fmt.Println("domain:", domain)
 	domainWorkerMap[domain] = worker
 	fmt.Println("domainWorkerMap:", domainWorkerMap)
-	crawlPage(worker, domain, url, depth)
+	crawlPage(worker, domain, req)
 	workerIp = worker.Ip
 	return
 } 
 
-func crawlPage(worker Worker, domain string, url string, depth int) {
+func crawlPage(worker Worker, domain string, crawlReq CrawlReq) {
 	wIpPort := getWorkerIpPort(worker)
-	req := CrawlPageReq{domain, url, depth}
+	req := CrawlPageReq{domain, crawlReq.Url, crawlReq.Depth}
 	var resp bool
 	client, err := rpc.Dial("tcp", wIpPort)
 	checkError("rpc.Dial in crawlPage()", err, true)
@@ -168,25 +188,26 @@ func joinWorker(conn net.Conn) {
 	
 	// TODO change to not require space delimiter
 	// send to socket
-	fmt.Fprintf(conn, strconv.Itoa(workerRPCPort)+" ")
+	fmt.Fprintf(conn, strconv.Itoa(workerRPCPort) + " " + clientIncomingIpPort + "\n")
 }
 
-// func listenClient() {
-// 	mServer := rpc.NewServer()
-// 	m := new(MServer)
-// 	mServer.Register(m)
-// 	l, err := net.Listen("tcp", clientIncomingIpPort)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	for {
-// 		conn, err := l.Accept()
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		go mServer.ServeConn(conn)
-// 	}
-// }
+func listenClients() {
+	cServer := rpc.NewServer()
+	c := new(CrawlServer)
+	cServer.Register(c)
+	l, err := net.Listen("tcp", clientIncomingIpPort)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("listening for rpc calls on:", clientIncomingIpPort)
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			panic(err)
+		}
+		go cServer.ServeConn(conn)
+	}
+}
 
 func getLatency(w Worker, url string) (latency int) {
 	wIpPort := getWorkerIpPort(w)

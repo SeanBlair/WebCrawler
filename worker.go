@@ -20,8 +20,10 @@ import (
 var (
 	portForRPC string
 	serverIpPort     string
+	serverRpcIpPort string
 	// domains []Domain
 	//  domain : url : Page
+	// TODO make sure thread safe as is map
 	domains map[string]map[string]Page
 )
 
@@ -50,6 +52,11 @@ type CrawlPageReq struct {
 	Depth int
 }
 
+type CrawlReq struct {
+	Url string
+	Depth int
+}
+
 
 func main() {
 
@@ -59,7 +66,7 @@ func main() {
 	}
 	fmt.Println("serverIpPort:", serverIpPort)
 
-	domains = new(map[string]map[string]Page)
+	domains = make(map[string]map[string]Page)
 
 	join()
 
@@ -78,7 +85,7 @@ func (p *WorkerRPC) GetLatency(req LatencyReq, latency *int) error {
 func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	fmt.Println("received call to CrawlPage()")
 	// crawlPage(req)
-	initCrawl(req)
+	go initCrawl(req)
 	*success = true
 	return nil
 }
@@ -86,11 +93,13 @@ func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 func initCrawl(req CrawlPageReq) {
 	// make sure domain exists
 	_, ok := domains[req.Domain]
+	// TODO mutex??
 	if !ok {
-		domains[req.Domain] = new(map[string]Page)
+		domains[req.Domain] = make(map[string]Page)
 	}
 	// make sure page exists
 	_, ok = domains[req.Domain][req.Url]
+	// TODO mutex??
 	if !ok {
 		domains[req.Domain][req.Url] = Page{-1, nil}
 	}
@@ -103,24 +112,51 @@ func crawlPage(req CrawlPageReq) {
 	// need to crawl deeper 
 	if req.Depth > page.DepthCrawled {
 		// never crawled, so links unknown
-		if page.Depth == -1 {
+		if page.DepthCrawled == -1 {
 			page.Links = parseLinks(req.Url)
 		}
 		// previously crawled but to lesser depth
 		page.DepthCrawled = req.Depth
 
+		// set page with updated depth and correct links
+		// TODO mutex??
+		domains[req.Domain][req.Url] = page
+
+		// process links (at least add them to domains, if not crawling)
+		// every link string should appear as an entry in its domain map
+		// by some worker.
 		for _, link := range page.Links {
 			linkDomain := getDomain(link)
-			if !myDomain(linkDomain) {
-				serverCrawl(link, req.Depth--)
+			if !isMyDomain(linkDomain) {
+				serverCrawl(link, req.Depth - 1)
 			} else {
-				initCrawl(CrawlPageReq{linkDomain, link, req.Depth--})
+				initCrawl(CrawlPageReq{linkDomain, link, req.Depth - 1})
 			}
 		}
 		// already crawled deep enough
 	} else {
 		return
 	}
+}
+
+func serverCrawl(url string, depth int) {
+	// need to call serverRpcIpPort
+	fmt.Println("Calling CrawlServer.Crawl using serverRpcIpPort:", serverRpcIpPort)
+
+	req := CrawlReq{url, depth}
+	var resp bool
+	client, err := rpc.Dial("tcp", serverRpcIpPort)
+	checkError("rpc.Dial in serverCrawl()", err, true)
+	err = client.Call("CrawlServer.Crawl", req, &resp)
+	checkError("client.Call(CrawlServer.Crawl: ", err, true)
+	err = client.Close()
+	checkError("client.Close() in serverCrawl(): ", err, true)
+	return
+}
+
+func isMyDomain(domain string) bool {
+	_, ok := domains[domain]
+	return ok
 }
 
 func getDomain(uri string) (domain string) {
@@ -133,7 +169,11 @@ func getDomain(uri string) (domain string) {
 func parseLinks(uri string) (links []string) {
 	htmlString := getHtmlString(uri)
 	urls := getAllLinks(htmlString)
-	links = fixRelativeUrls(urls)
+	fmt.Println("Urls returned from getAllLinks() in parseLinks():", urls)
+	// TODO 
+	// links = fixRelativeUrls(urls)
+	links = urls
+	return
 }
 
 // func crawlPage(req CrawlPageReq) {
@@ -143,6 +183,29 @@ func parseLinks(uri string) (links []string) {
 // 	setLinks(page, htmlString)
 // 	return
 // }
+
+func getAllLinks(htmlString string) (urls []string) {
+	doc, err := html.Parse(strings.NewReader(htmlString))
+	checkError("Error in setAllLinks(), html.Parse():", err, true)
+	
+	// based on https://godoc.org/golang.org/x/net/html#example-Parse	
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+    	if n.Type == html.ElementNode && n.Data == "a" {
+        	for _, a := range n.Attr {
+            	if a.Key == "href" {
+                	urls = append(urls, a.Val)
+                	break
+            	}
+        	}
+    	}
+    	for c := n.FirstChild; c != nil; c = c.NextSibling {
+        	f(c)
+    	}
+	}
+	f(doc)
+	return
+}
 
 func getHtmlString(uri string) (htmlString string) {
 	res, err := http.Get(uri)
@@ -154,45 +217,47 @@ func getHtmlString(uri string) (htmlString string) {
 	return
 }
 
-func setLinks(page Page, htmlStr string) {
-	fmt.Println("Setting links of page:", page)
-	var links []Page 
 
-	doc, err := html.Parse(strings.NewReader(htmlStr))
-	checkError("Error in setLinks(), html.Parse():", err, true)
+
+// func setLinks(page Page, htmlStr string) {
+// 	fmt.Println("Setting links of page:", page)
+// 	var links []Page 
+
+// 	doc, err := html.Parse(strings.NewReader(htmlStr))
+// 	checkError("Error in setLinks(), html.Parse():", err, true)
 	
-	// based on https://godoc.org/golang.org/x/net/html#example-Parse	
-	var f func(*html.Node)
-	f = func(n *html.Node) {
-    	if n.Type == html.ElementNode && n.Data == "a" {
-        	for _, a := range n.Attr {
-            	if a.Key == "href" {
-                	fmt.Println(a.Val)
-                	links = append(links, Page{a.Val, nil})
-                	break
-            	}
-        	}
-    	}
-    	for c := n.FirstChild; c != nil; c = c.NextSibling {
-        	f(c)
-    	}
-	}
-	f(doc)
+// 	// based on https://godoc.org/golang.org/x/net/html#example-Parse	
+// 	var f func(*html.Node)
+// 	f = func(n *html.Node) {
+//     	if n.Type == html.ElementNode && n.Data == "a" {
+//         	for _, a := range n.Attr {
+//             	if a.Key == "href" {
+//                 	fmt.Println(a.Val)
+//                 	links = append(links, Page{a.Val, nil})
+//                 	break
+//             	}
+//         	}
+//     	}
+//     	for c := n.FirstChild; c != nil; c = c.NextSibling {
+//         	f(c)
+//     	}
+// 	}
+// 	f(doc)
 
-	page.Links = links
-	fmt.Println("Page after setting links:", page)
-}
+// 	page.Links = links
+// 	fmt.Println("Page after setting links:", page)
+// }
 
-func setNewDomain(req CrawlPageReq) (page Page) {
-	fmt.Println("domains:", domains)
-	var pages []Page
-	pages = append(pages, Page{req.Url, nil})
-	domains = append(domains, Domain{req.Domain, pages})
-	fmt.Println("domains after adding new domain:", domains)
-	// first page of latest domain added to domains
-	page = domains[len(domains) - 1].Pages[0]
-	return
-}
+// func setNewDomain(req CrawlPageReq) (page Page) {
+// 	fmt.Println("domains:", domains)
+// 	var pages []Page
+// 	pages = append(pages, Page{req.Url, nil})
+// 	domains = append(domains, Domain{req.Domain, pages})
+// 	fmt.Println("domains after adding new domain:", domains)
+// 	// first page of latest domain added to domains
+// 	page = domains[len(domains) - 1].Pages[0]
+// 	return
+// }
 
 func getLatency(req LatencyReq) (latency int) {
 	var latencyList []int
@@ -251,12 +316,19 @@ func join() {
 	fmt.Println("dialed server")
 
 	// TODO make more elegant than space delimiter...
-	port, err := bufio.NewReader(conn).ReadString(' ')
+	port, err := bufio.NewReader(conn).ReadString('\n')
 	checkError("Error in join(), bufio.NewReader(conn).ReadString()", err, true)
 	fmt.Println("Message from server: ", port)
 
-	portForRPC = strings.Trim(port, " ")
-	fmt.Println("My portForWorkerRPC is:", portForRPC)
+	// need to split
+	message := strings.Split(port, " ")
+
+	// portForRPC = strings.Trim(port, " ")
+	portForRPC = message[0]
+	serverRpcIpPort = message[1]
+
+	fmt.Println("My portForWorkerRPC is:", portForRPC, "and my serverRpcIpPort is:", serverRpcIpPort)
+	// fmt.Println("My portForWorkerRPC is:", message[0], "and my ")
 }
 
 func ParseArguments() (err error) {
