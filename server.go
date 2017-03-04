@@ -21,7 +21,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
+	// "time"
 )
 
 var (
@@ -32,7 +32,7 @@ var (
 	workers              []Worker
 	domainWorkerMap      map[string]Worker
 	// for testing TODO eliminate
-	website string
+	// website string
 )
 
 type Worker struct {
@@ -44,7 +44,15 @@ type WorkerLatency struct {
 	Latency int
 }
 
-type CrawlServer int
+type MServer int
+
+// Request that client sends in RPC call to MServer.GetWorkers
+type GetWorkersReq struct{}
+
+// Response to MServer.GetWorkers
+type GetWorkersRes struct {
+	WorkerIPsList []string // List of workerIP string
+}
 
 type WorkerRPC int 
 
@@ -77,32 +85,37 @@ func main() {
 
 	go listenWorkers()
 
-	go listenClients()
+	listenClients()
 
-	test()
+	// test()
 }
 
-func test() {
-	// for testing without client
-	for {
-		if len(workers) > 0 {
-			time.Sleep(2 * time.Second)
-			break
-		}
-		// to allow azure to work...
-		time.Sleep(1 * time.Second)
-	}
+// func test() {
+// 	// for testing without client
+// 	for {
+// 		if len(workers) > 0 {
+// 			time.Sleep(2 * time.Second)
+// 			break
+// 		}
+// 		// to allow azure to work...
+// 		time.Sleep(1 * time.Second)
+// 	}
 
-	fmt.Println("Calling crawl(", website,"0)")
-	// workerIp := crawl(website, 0)
-	workerIp := crawl(CrawlReq{website, 0})
+// 	fmt.Println("Calling crawl(", website,"0)")
+// 	// workerIp := crawl(website, 0)
+// 	workerIp := crawl(CrawlReq{website, 0})
 
-	fmt.Println("Used worker:", workerIp, "to crawl:", website)
+// 	fmt.Println("Used worker:", workerIp, "to crawl:", website)
 
-	fmt.Println("Bye bye...")
+// 	fmt.Println("Bye bye...")
+// }
+
+func (p *MServer) GetWorkers(req GetWorkersReq, resp *GetWorkersRes) error {
+	resp.WorkerIPsList = getWorkersIpList()
+	return nil
 }
 
-func (p *CrawlServer) Crawl(req CrawlReq, success *bool) error {
+func (p *MServer) Crawl(req CrawlReq, success *bool) error {
 	fmt.Println("received call to Crawl()")
 	// crawlPage(req)
 	workerOwnerIp := crawl(req)
@@ -110,6 +123,13 @@ func (p *CrawlServer) Crawl(req CrawlReq, success *bool) error {
 	fmt.Println("workerOwnerIp:", workerOwnerIp) 
 	*success = true
 	return nil
+}
+
+func getWorkersIpList() (list []string) {
+	for _, worker := range workers {
+		list = append(list, worker.Ip)
+	}
+	return
 }
 
 func crawl(req CrawlReq) (workerIp string) {
@@ -192,9 +212,9 @@ func joinWorker(conn net.Conn) {
 }
 
 func listenClients() {
-	cServer := rpc.NewServer()
-	c := new(CrawlServer)
-	cServer.Register(c)
+	mServer := rpc.NewServer()
+	m := new(MServer)
+	mServer.Register(m)
 	l, err := net.Listen("tcp", clientIncomingIpPort)
 	if err != nil {
 		panic(err)
@@ -205,7 +225,7 @@ func listenClients() {
 		if err != nil {
 			panic(err)
 		}
-		go cServer.ServeConn(conn)
+		go mServer.ServeConn(conn)
 	}
 }
 
@@ -228,13 +248,13 @@ func getWorkerIpPort(w Worker) (s string) {
 
 func ParseArguments() (err error) {
 	arguments := os.Args[1:]
-	if len(arguments) == 3 {
+	if len(arguments) == 2 {
 		workerIncomingIpPort = arguments[0]
 		clientIncomingIpPort = arguments[1]
 		// for testing TODO eliminate
-		website = arguments[2]
+		// website = arguments[2]
 	} else {
-		err = fmt.Errorf("Usage: {go run server.go [worker-incoming ip:port] [client-incoming ip:port] [website]}")
+		err = fmt.Errorf("Usage: {go run server.go [worker-incoming ip:port] [client-incoming ip:port]}")
 		return
 	}
 	return
