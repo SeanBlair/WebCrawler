@@ -65,6 +65,17 @@ type CrawlRes struct {
 	WorkerIP string // workerIP
 }
 
+// Request that client sends in RPC call to MServer.Domains
+type DomainsReq struct {
+	WorkerIP string // IP of worker
+}
+
+// Response to MServer.Domains
+type DomainsRes struct {
+	Domains []string // List of domain string
+}
+
+
 type WorkerRPC int 
 
 type LatencyReq struct {
@@ -104,6 +115,24 @@ func (p *MServer) Crawl(req CrawlReq, resp *CrawlRes) error {
 	workerOwnerIp := crawl(req)
 	*resp = CrawlRes{workerOwnerIp}
 	return nil
+}
+
+func (p *MServer) Domains(req DomainsReq, resp *DomainsRes) error {
+	domains := getDomains(req)
+	*resp = DomainsRes{domains}
+	return nil
+}
+
+func getDomains(req DomainsReq) (domainsList []string) {
+	wIpPort := getWorkerIpPort(Worker{req.WorkerIP})
+	getDomReq := true
+	client, err := rpc.Dial("tcp", wIpPort)
+	checkError("rpc.Dial in getDomains()", err, true)
+	err = client.Call("WorkerRPC.GetDomains", getDomReq, &domainsList)
+	checkError("client.Call(WorkerRPC.GetDomains in getDomains(): ", err, true)	
+	err = client.Close()
+	checkError("client.Close() in getDomains(): ", err, true)
+	return
 }
 
 func getWorkersIpList() (list []string) {

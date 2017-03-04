@@ -82,6 +82,19 @@ func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	return nil
 }
 
+func (p *WorkerRPC) GetDomains(req bool, domainsReq *[]string) error {
+	fmt.Println("received call to GetDomains()")
+	*domainsReq = getDomains()
+	return nil
+}
+
+func getDomains() (domainsList []string) {
+	for k := range domains {
+    	domainsList = append(domainsList, k)
+	}
+	return
+}
+
 func initCrawl(req CrawlPageReq) {
 	fmt.Println("domains before initCrawl() processes:", domains)
 
