@@ -181,9 +181,19 @@ func parseLinks(uri string) (links []string) {
 	htmlString := getHtmlString(uri)
 	urls := getAllLinks(htmlString)
 	fmt.Println("Urls returned from getAllLinks() in parseLinks():", urls)
-	// TODO 
-	// links = fixRelativeUrls(urls)
-	links = urls
+	links = fixRelativeUrls(uri, urls)
+	fmt.Println("Urls after fixed with fixRelativeUrls():", links)
+	return
+}
+
+func fixRelativeUrls(baseUrl string, relativeUrls []string) (urls []string) {
+	base, err := url.Parse(baseUrl)
+	checkError("Error in fixRelativeUrls(), url.Parse("+baseUrl+"):", err, true)
+	for _, uri := range relativeUrls {
+		u, err := url.Parse(uri)
+		checkError("Error in fixRelativeUrls(), url.Parse("+uri+"):", err, true)
+		urls = append(urls, base.ResolveReference(u).String())
+	}
 	return
 }
 
