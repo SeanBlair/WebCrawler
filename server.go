@@ -93,28 +93,7 @@ func main() {
 
 	listenClients()
 
-	// test()
 }
-
-// func test() {
-// 	// for testing without client
-// 	for {
-// 		if len(workers) > 0 {
-// 			time.Sleep(2 * time.Second)
-// 			break
-// 		}
-// 		// to allow azure to work...
-// 		time.Sleep(1 * time.Second)
-// 	}
-
-// 	fmt.Println("Calling crawl(", website,"0)")
-// 	// workerIp := crawl(website, 0)
-// 	workerIp := crawl(CrawlReq{website, 0})
-
-// 	fmt.Println("Used worker:", workerIp, "to crawl:", website)
-
-// 	fmt.Println("Bye bye...")
-// }
 
 func (p *MServer) GetWorkers(req GetWorkersReq, resp *GetWorkersRes) error {
 	resp.WorkerIPsList = getWorkersIpList()
@@ -122,12 +101,7 @@ func (p *MServer) GetWorkers(req GetWorkersReq, resp *GetWorkersRes) error {
 }
 
 func (p *MServer) Crawl(req CrawlReq, resp *CrawlRes) error {
-	fmt.Println("received call to Crawl() with req:", req)
-	// crawlPage(req)
 	workerOwnerIp := crawl(req)
-	// TODO will have to return workerOwnerIp to client
-	fmt.Println("workerOwnerIp:", workerOwnerIp) 
-
 	*resp = CrawlRes{workerOwnerIp}
 	return nil
 }
@@ -140,9 +114,7 @@ func getWorkersIpList() (list []string) {
 }
 
 func crawl(req CrawlReq) (workerIp string) {
-	fmt.Println("received call to crawl() with req:", req)
 	worker := findClosestWorker(req.URL)
-	fmt.Println("The closest worker is:", worker)
 	fmt.Println("url:", req.URL)
 	domain := getDomain(req.URL)
 	fmt.Println("domain:", domain)
@@ -154,16 +126,13 @@ func crawl(req CrawlReq) (workerIp string) {
 } 
 
 func crawlPage(worker Worker, domain string, crawlReq CrawlReq) {
-	fmt.Println("received call to crawlPage() with crawlReq:", crawlReq)
 	wIpPort := getWorkerIpPort(worker)
 	req := CrawlPageReq{domain, crawlReq.URL, crawlReq.Depth}
-	fmt.Println("calling worker with CrawlPageReq:", req)
 	var resp bool
 	client, err := rpc.Dial("tcp", wIpPort)
 	checkError("rpc.Dial in crawlPage()", err, true)
 	err = client.Call("WorkerRPC.CrawlPage", req, &resp)
-	checkError("client.Call(WorkerRPC.CrawlPage: ", err, true)
-	fmt.Println("Successfully called WorkerRPC.CrawlPage with req:", req)	
+	checkError("client.Call(WorkerRPC.CrawlPage: ", err, true)	
 	err = client.Close()
 	checkError("client.Close() in crawlPage(): ", err, true)
 	return
@@ -217,8 +186,6 @@ func joinWorker(conn net.Conn) {
 
 	workers = append(workers, Worker{workerIp})
 	
-	// TODO change to not require space delimiter
-	// send to socket
 	fmt.Fprintf(conn, strconv.Itoa(workerRPCPort) + " " + clientIncomingIpPort + "\n")
 }
 

@@ -21,16 +21,10 @@ var (
 	portForRPC string
 	serverIpPort     string
 	serverRpcIpPort string
-	// domains []Domain
 	//  domain : url : Page
 	// TODO make sure thread safe as is map
 	domains map[string]map[string]Page
 )
-
-// type Domain struct {
-// 	Name string
-// 	Pages []Page
-// }
 
 type Page struct {
 	DepthCrawled int
@@ -64,7 +58,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("serverIpPort:", serverIpPort)
 
 	domains = make(map[string]map[string]Page)
 
@@ -84,16 +77,13 @@ func (p *WorkerRPC) GetLatency(req LatencyReq, latency *int) error {
 
 func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	fmt.Println("received call to CrawlPage() with req:", req)
-	// crawlPage(req)
 	go initCrawl(req)
 	*success = true
 	return nil
 }
 
 func initCrawl(req CrawlPageReq) {
-	
 	fmt.Println("domains before initCrawl() processes:", domains)
-	fmt.Println("initCrawl() called with CrawlPageReq:", req)
 
 	// make sure domain exists
 	_, ok := domains[req.Domain]
@@ -107,6 +97,7 @@ func initCrawl(req CrawlPageReq) {
 	if !ok {
 		domains[req.Domain][req.URL] = Page{-1, nil}
 	}
+
 	fmt.Println("domains after initCrawl() processes:", domains)
 	crawlPage(req)
 }
@@ -133,6 +124,7 @@ func crawlPage(req CrawlPageReq) {
 		for _, link := range page.Links {
 			linkDomain := getDomain(link)
 			if !isMyDomain(linkDomain) {
+				// TODO implement
 				// serverCrawl(link, req.Depth - 1)
 				fmt.Println("TODO, need to call serverCrawl for url:", link)
 			} else {
@@ -182,14 +174,6 @@ func parseLinks(uri string) (links []string) {
 	return
 }
 
-// func crawlPage(req CrawlPageReq) {
-// 	page := setNewDomain(req)
-// 	fmt.Println("setNewDomain() in crawlPage() returned:", page)
-// 	htmlString := getHtmlString(req.Url)
-// 	setLinks(page, htmlString)
-// 	return
-// }
-
 func getAllLinks(htmlString string) (urls []string) {
 	doc, err := html.Parse(strings.NewReader(htmlString))
 	checkError("Error in setAllLinks(), html.Parse():", err, true)
@@ -224,47 +208,6 @@ func getHtmlString(uri string) (htmlString string) {
 }
 
 
-
-// func setLinks(page Page, htmlStr string) {
-// 	fmt.Println("Setting links of page:", page)
-// 	var links []Page 
-
-// 	doc, err := html.Parse(strings.NewReader(htmlStr))
-// 	checkError("Error in setLinks(), html.Parse():", err, true)
-	
-// 	// based on https://godoc.org/golang.org/x/net/html#example-Parse	
-// 	var f func(*html.Node)
-// 	f = func(n *html.Node) {
-//     	if n.Type == html.ElementNode && n.Data == "a" {
-//         	for _, a := range n.Attr {
-//             	if a.Key == "href" {
-//                 	fmt.Println(a.Val)
-//                 	links = append(links, Page{a.Val, nil})
-//                 	break
-//             	}
-//         	}
-//     	}
-//     	for c := n.FirstChild; c != nil; c = c.NextSibling {
-//         	f(c)
-//     	}
-// 	}
-// 	f(doc)
-
-// 	page.Links = links
-// 	fmt.Println("Page after setting links:", page)
-// }
-
-// func setNewDomain(req CrawlPageReq) (page Page) {
-// 	fmt.Println("domains:", domains)
-// 	var pages []Page
-// 	pages = append(pages, Page{req.Url, nil})
-// 	domains = append(domains, Domain{req.Domain, pages})
-// 	fmt.Println("domains after adding new domain:", domains)
-// 	// first page of latest domain added to domains
-// 	page = domains[len(domains) - 1].Pages[0]
-// 	return
-// }
-
 func getLatency(req LatencyReq) (latency int) {
 	var latencyList []int
 
@@ -273,10 +216,7 @@ func getLatency(req LatencyReq) (latency int) {
 		latencyList = append(latencyList, latency)
 	}
 
-	fmt.Println("latencyList before sorting:", latencyList)
-
 	sort.Ints(latencyList)
-
 	fmt.Println("latencyList after sorting:", latencyList)
 	
 	latency = latencyList[0]
@@ -319,12 +259,9 @@ func join() {
 	conn, err := net.Dial("tcp", serverIpPort)
 	checkError("Error in join(), net.Dial()", err, true)
 
-	fmt.Println("dialed server")
-
 	// TODO make more elegant than space delimiter...
 	port, err := bufio.NewReader(conn).ReadString('\n')
 	checkError("Error in join(), bufio.NewReader(conn).ReadString()", err, true)
-	fmt.Println("Message from server: ", port)
 
 	// need to split
 	message := strings.Split(port, " ")
@@ -332,9 +269,8 @@ func join() {
 	// portForRPC = strings.Trim(port, " ")
 	portForRPC = message[0]
 	serverRpcIpPort = message[1]
-
+	fmt.Println("Successful in joining server")
 	fmt.Println("My portForWorkerRPC is:", portForRPC, "and my serverRpcIpPort is:", serverRpcIpPort)
-	// fmt.Println("My portForWorkerRPC is:", message[0], "and my ")
 }
 
 func ParseArguments() (err error) {
