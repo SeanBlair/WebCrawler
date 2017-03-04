@@ -99,6 +99,7 @@ func main() {
 	domainWorkerMap = make(map[string]Worker)
 
 	go listenWorkers()
+	go listenRpcWorkers()
 
 	listenClients()
 
@@ -222,7 +223,7 @@ func joinWorker(conn net.Conn) {
 
 	workers = append(workers, Worker{workerIp})
 	
-	fmt.Fprintf(conn, strconv.Itoa(workerRPCPort) + " " + clientIncomingIpPort + "\n")
+	fmt.Fprintf(conn, strconv.Itoa(workerRPCPort) + " " + getIpPortForRpcFromWorkers() + "\n")
 }
 
 func listenClients() {
@@ -241,6 +242,32 @@ func listenClients() {
 		}
 		go mServer.ServeConn(conn)
 	}
+}
+
+func listenRpcWorkers() {
+	mServer := rpc.NewServer()
+	m := new(MServer)
+	mServer.Register(m)
+	// l, err := net.Listen("tcp", clientIncomingIpPort)
+	ipPort := getIpPortForRpcFromWorkers()
+	l, err := net.Listen("tcp", ipPort)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("listening for rpc calls from workers on:", ipPort)
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			panic(err)
+		}
+		go mServer.ServeConn(conn)
+	}
+}
+
+func getIpPortForRpcFromWorkers() (ipPort string) {
+	ipAndPort := strings.Split(workerIncomingIpPort, ":")
+	ipPort = ipAndPort[0] +":"+ strconv.Itoa(workerRPCPort+1)
+	return
 }
 
 func getLatency(w Worker, url string) (latency int) {

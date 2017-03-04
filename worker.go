@@ -46,11 +46,16 @@ type CrawlPageReq struct {
 	Depth int
 }
 
+// Request that client sends in RPC call to MServer.Crawl
 type CrawlReq struct {
-	URL string
-	Depth int
+	URL   string // URL of the website to crawl
+	Depth int    // Depth to crawl to from URL
 }
 
+// Response to MServer.Crawl
+type CrawlRes struct {
+	WorkerIP string // workerIP
+}
 
 func main() {
 
@@ -138,7 +143,7 @@ func crawlPage(req CrawlPageReq) {
 			linkDomain := getDomain(link)
 			if !isMyDomain(linkDomain) {
 				// TODO implement
-				// serverCrawl(link, req.Depth - 1)
+				serverCrawl(link, req.Depth - 1)
 				fmt.Println("TODO, need to call serverCrawl for url:", link)
 			} else {
 				initCrawl(CrawlPageReq{linkDomain, link, req.Depth - 1})
@@ -152,18 +157,38 @@ func crawlPage(req CrawlPageReq) {
 
 func serverCrawl(url string, depth int) {
 	// need to call serverRpcIpPort
-	fmt.Println("Calling CrawlServer.Crawl using serverRpcIpPort:", serverRpcIpPort)
+	// fmt.Println("Calling CrawlServer.Crawl using serverRpcIpPort:", serverRpcIpPort)
+
+	// raddr, err := net.ResolveTCPAddr("tcp", serverRpcIpPort)
+	// checkError("Error in serverCrawl(), net.ResolveTCPAddr():", err, true)
 
 	req := CrawlReq{url, depth}
-	var resp bool
+	var resp CrawlRes
+	// client, err := rpc.Dial("tcp", raddr.String())
+	// conn, err := net.DialTCP("tcp", nil, raddr)
+	// client, err := rpc.Dial("tcp", "localhost:2223")
+	// client := rpc.NewClient(conn)
 	client, err := rpc.Dial("tcp", serverRpcIpPort)
+
 	checkError("rpc.Dial in serverCrawl()", err, true)
 	err = client.Call("MServer.Crawl", req, &resp)
 	checkError("client.Call(MServer.Crawl: ", err, true)
+	fmt.Println("Server responded to MServer.Crawl() with:", resp)
 	err = client.Close()
 	checkError("client.Close() in serverCrawl(): ", err, true)
-	return
 }
+
+// raddr, err := net.ResolveTCPAddr("tcp", serverIpPort)
+// 	if err != nil {
+// 		logger.Fatal(err)
+// 	}
+// 	conn, err := net.DialTCP("tcp", nil, raddr)
+// 	if err != nil {
+// 		logger.Fatal(err)
+// 	}
+// 	client := rpc.NewClient(conn)
+
+
 
 func isMyDomain(domain string) bool {
 	_, ok := domains[domain]
