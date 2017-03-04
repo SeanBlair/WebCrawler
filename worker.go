@@ -9,27 +9,30 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
 	"time"
-	// "golang.org/x/net/html"
+	"golang.org/x/net/html"
 )
 
 var (
 	portForRPC string
 	serverIpPort     string
-	domains []Domain
+	// domains []Domain
+	//  domain : url : Page
+	domains map[string]map[string]Page
 )
 
-type Domain struct {
-	Name string
-	Pages []Page
-}
+// type Domain struct {
+// 	Name string
+// 	Pages []Page
+// }
 
 type Page struct {
-	Name string
-	Links []Page
+	DepthCrawled int
+	Links []string
 }
 
 type CrawlServer int
@@ -56,6 +59,8 @@ func main() {
 	}
 	fmt.Println("serverIpPort:", serverIpPort)
 
+	domains = new(map[string]map[string]Page)
+
 	join()
 
 	fmt.Println("Successfully joined. Server:", serverIpPort, "RPCport:", portForRPC)
@@ -72,19 +77,72 @@ func (p *WorkerRPC) GetLatency(req LatencyReq, latency *int) error {
 
 func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	fmt.Println("received call to CrawlPage()")
-	crawlPage(req)
+	// crawlPage(req)
+	initCrawl(req)
 	*success = true
 	return nil
 }
 
-func crawlPage(req CrawlPageReq) {
-	page := setNewDomain(req)
-	fmt.Println("setNewDomain() in crawlPage() returned:", page)
-	htmlString := getHtmlString(req.Url)
-	// setLinks(page, htmlString)
-	fmt.Println("getHtmlString() in crawlPage() returned:", htmlString)
-	return
+func initCrawl(req CrawlPageReq) {
+	// make sure domain exists
+	_, ok := domains[req.Domain]
+	if !ok {
+		domains[req.Domain] = new(map[string]Page)
+	}
+	// make sure page exists
+	_, ok = domains[req.Domain][req.Url]
+	if !ok {
+		domains[req.Domain][req.Url] = Page{-1, nil}
+	}
+	crawlPage(req)
 }
+
+// requires entry in domains[req.Domain][req.Url] : Page{x, y}
+func crawlPage(req CrawlPageReq) {
+	page := domains[req.Domain][req.Url]
+	// need to crawl deeper 
+	if req.Depth > page.DepthCrawled {
+		// never crawled, so links unknown
+		if page.Depth == -1 {
+			page.Links = parseLinks(req.Url)
+		}
+		// previously crawled but to lesser depth
+		page.DepthCrawled = req.Depth
+
+		for _, link := range page.Links {
+			linkDomain := getDomain(link)
+			if !myDomain(linkDomain) {
+				serverCrawl(link, req.Depth--)
+			} else {
+				initCrawl(CrawlPageReq{linkDomain, link, req.Depth--})
+			}
+		}
+		// already crawled deep enough
+	} else {
+		return
+	}
+}
+
+func getDomain(uri string) (domain string) {
+	u, err := url.Parse(uri)
+    checkError("Error in getDomain(), url.Parse():", err, true)
+	domain = u.Host
+	return 
+}
+
+func parseLinks(uri string) (links []string) {
+	htmlString := getHtmlString(uri)
+	urls := getAllLinks(htmlString)
+	links = fixRelativeUrls(urls)
+}
+
+// func crawlPage(req CrawlPageReq) {
+// 	page := setNewDomain(req)
+// 	fmt.Println("setNewDomain() in crawlPage() returned:", page)
+// 	htmlString := getHtmlString(req.Url)
+// 	setLinks(page, htmlString)
+// 	return
+// }
 
 func getHtmlString(uri string) (htmlString string) {
 	res, err := http.Get(uri)
@@ -96,33 +154,34 @@ func getHtmlString(uri string) (htmlString string) {
 	return
 }
 
-func setLinks(page Page, html string) {
+func setLinks(page Page, htmlStr string) {
 	fmt.Println("Setting links of page:", page)
+	var links []Page 
 
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	checkError("Error in setLinks(), html.Parse():", err, true)
+	
+	// based on https://godoc.org/golang.org/x/net/html#example-Parse	
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+    	if n.Type == html.ElementNode && n.Data == "a" {
+        	for _, a := range n.Attr {
+            	if a.Key == "href" {
+                	fmt.Println(a.Val)
+                	links = append(links, Page{a.Val, nil})
+                	break
+            	}
+        	}
+    	}
+    	for c := n.FirstChild; c != nil; c = c.NextSibling {
+        	f(c)
+    	}
+	}
+	f(doc)
 
+	page.Links = links
 	fmt.Println("Page after setting links:", page)
 }
-
-// s := `<p>Links:</p><ul><li><a href="foo">Foo</a><li><a href="/bar/baz">BarBaz</a></ul>`
-// doc, err := html.Parse(strings.NewReader(s))
-// if err != nil {
-//     log.Fatal(err)
-// }
-// var f func(*html.Node)
-// f = func(n *html.Node) {
-//     if n.Type == html.ElementNode && n.Data == "a" {
-//         for _, a := range n.Attr {
-//             if a.Key == "href" {
-//                 fmt.Println(a.Val)
-//                 break
-//             }
-//         }
-//     }
-//     for c := n.FirstChild; c != nil; c = c.NextSibling {
-//         f(c)
-//     }
-// }
-// f(doc)
 
 func setNewDomain(req CrawlPageReq) (page Page) {
 	fmt.Println("domains:", domains)
@@ -182,6 +241,7 @@ func listen(ipPort string) {
 		go wServer.ServeConn(conn)
 	}
 }
+
 
 func join() {
 
