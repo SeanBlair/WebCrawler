@@ -54,21 +54,27 @@ type GetWorkersRes struct {
 	WorkerIPsList []string // List of workerIP string
 }
 
+// Request that client sends in RPC call to MServer.Crawl
+type CrawlReq struct {
+	URL   string // URL of the website to crawl
+	Depth int    // Depth to crawl to from URL
+}
+
+// Response to MServer.Crawl
+type CrawlRes struct {
+	WorkerIP string // workerIP
+}
+
 type WorkerRPC int 
 
 type LatencyReq struct {
-	URI string
+	URL string
 	Samples int
 }
 
 type CrawlPageReq struct {
 	Domain string
-	Url string
-	Depth int
-}
-
-type CrawlReq struct {
-	Url string
+	URL string
 	Depth int
 }
 
@@ -115,13 +121,14 @@ func (p *MServer) GetWorkers(req GetWorkersReq, resp *GetWorkersRes) error {
 	return nil
 }
 
-func (p *MServer) Crawl(req CrawlReq, success *bool) error {
-	fmt.Println("received call to Crawl()")
+func (p *MServer) Crawl(req CrawlReq, resp *CrawlRes) error {
+	fmt.Println("received call to Crawl() with req:", req)
 	// crawlPage(req)
 	workerOwnerIp := crawl(req)
 	// TODO will have to return workerOwnerIp to client
 	fmt.Println("workerOwnerIp:", workerOwnerIp) 
-	*success = true
+
+	*resp = CrawlRes{workerOwnerIp}
 	return nil
 }
 
@@ -133,26 +140,30 @@ func getWorkersIpList() (list []string) {
 }
 
 func crawl(req CrawlReq) (workerIp string) {
-	worker := findClosestWorker(req.Url)
+	fmt.Println("received call to crawl() with req:", req)
+	worker := findClosestWorker(req.URL)
 	fmt.Println("The closest worker is:", worker)
-	fmt.Println("url:", req.Url)
-	domain := getDomain(req.Url)
+	fmt.Println("url:", req.URL)
+	domain := getDomain(req.URL)
 	fmt.Println("domain:", domain)
 	domainWorkerMap[domain] = worker
 	fmt.Println("domainWorkerMap:", domainWorkerMap)
-	crawlPage(worker, domain, req)
+	go crawlPage(worker, domain, req)
 	workerIp = worker.Ip
 	return
 } 
 
 func crawlPage(worker Worker, domain string, crawlReq CrawlReq) {
+	fmt.Println("received call to crawlPage() with crawlReq:", crawlReq)
 	wIpPort := getWorkerIpPort(worker)
-	req := CrawlPageReq{domain, crawlReq.Url, crawlReq.Depth}
+	req := CrawlPageReq{domain, crawlReq.URL, crawlReq.Depth}
+	fmt.Println("calling worker with CrawlPageReq:", req)
 	var resp bool
 	client, err := rpc.Dial("tcp", wIpPort)
 	checkError("rpc.Dial in crawlPage()", err, true)
 	err = client.Call("WorkerRPC.CrawlPage", req, &resp)
 	checkError("client.Call(WorkerRPC.CrawlPage: ", err, true)
+	fmt.Println("Successfully called WorkerRPC.CrawlPage with req:", req)	
 	err = client.Close()
 	checkError("client.Close() in crawlPage(): ", err, true)
 	return

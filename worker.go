@@ -37,23 +37,23 @@ type Page struct {
 	Links []string
 }
 
-type CrawlServer int
+type MServer int
 
 type WorkerRPC int
 
 type LatencyReq struct {
-	URI string
+	URL string
 	Samples int
 }
 
 type CrawlPageReq struct {
 	Domain string
-	Url string
+	URL string
 	Depth int
 }
 
 type CrawlReq struct {
-	Url string
+	URL string
 	Depth int
 }
 
@@ -83,7 +83,7 @@ func (p *WorkerRPC) GetLatency(req LatencyReq, latency *int) error {
 }
 
 func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
-	fmt.Println("received call to CrawlPage()")
+	fmt.Println("received call to CrawlPage() with req:", req)
 	// crawlPage(req)
 	go initCrawl(req)
 	*success = true
@@ -91,6 +91,10 @@ func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 }
 
 func initCrawl(req CrawlPageReq) {
+	
+	fmt.Println("domains before initCrawl() processes:", domains)
+	fmt.Println("initCrawl() called with CrawlPageReq:", req)
+
 	// make sure domain exists
 	_, ok := domains[req.Domain]
 	// TODO mutex??
@@ -98,37 +102,39 @@ func initCrawl(req CrawlPageReq) {
 		domains[req.Domain] = make(map[string]Page)
 	}
 	// make sure page exists
-	_, ok = domains[req.Domain][req.Url]
+	_, ok = domains[req.Domain][req.URL]
 	// TODO mutex??
 	if !ok {
-		domains[req.Domain][req.Url] = Page{-1, nil}
+		domains[req.Domain][req.URL] = Page{-1, nil}
 	}
+	fmt.Println("domains after initCrawl() processes:", domains)
 	crawlPage(req)
 }
 
 // requires entry in domains[req.Domain][req.Url] : Page{x, y}
 func crawlPage(req CrawlPageReq) {
-	page := domains[req.Domain][req.Url]
+	page := domains[req.Domain][req.URL]
 	// need to crawl deeper 
 	if req.Depth > page.DepthCrawled {
 		// never crawled, so links unknown
 		if page.DepthCrawled == -1 {
-			page.Links = parseLinks(req.Url)
+			page.Links = parseLinks(req.URL)
 		}
 		// previously crawled but to lesser depth
 		page.DepthCrawled = req.Depth
 
 		// set page with updated depth and correct links
 		// TODO mutex??
-		domains[req.Domain][req.Url] = page
-
+		domains[req.Domain][req.URL] = page
+		fmt.Println("domains after crawling page:", req.URL, "are:", domains)
 		// process links (at least add them to domains, if not crawling)
 		// every link string should appear as an entry in its domain map
 		// by some worker.
 		for _, link := range page.Links {
 			linkDomain := getDomain(link)
 			if !isMyDomain(linkDomain) {
-				serverCrawl(link, req.Depth - 1)
+				// serverCrawl(link, req.Depth - 1)
+				fmt.Println("TODO, need to call serverCrawl for url:", link)
 			} else {
 				initCrawl(CrawlPageReq{linkDomain, link, req.Depth - 1})
 			}
@@ -147,8 +153,8 @@ func serverCrawl(url string, depth int) {
 	var resp bool
 	client, err := rpc.Dial("tcp", serverRpcIpPort)
 	checkError("rpc.Dial in serverCrawl()", err, true)
-	err = client.Call("CrawlServer.Crawl", req, &resp)
-	checkError("client.Call(CrawlServer.Crawl: ", err, true)
+	err = client.Call("MServer.Crawl", req, &resp)
+	checkError("client.Call(MServer.Crawl: ", err, true)
 	err = client.Close()
 	checkError("client.Close() in serverCrawl(): ", err, true)
 	return
@@ -263,7 +269,7 @@ func getLatency(req LatencyReq) (latency int) {
 	var latencyList []int
 
 	for i := 0; i < req.Samples; i++ {
-		latency := pingSite(req.URI)
+		latency := pingSite(req.URL)
 		latencyList = append(latencyList, latency)
 	}
 
