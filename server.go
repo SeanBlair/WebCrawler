@@ -27,9 +27,9 @@ import (
 var (
 	workerIncomingIpPort string
 	clientIncomingIpPort string
-	samplesPerWorker 	 int = 5
+	samplesPerWorker     int    = 5
 	workerRPCPort        string = "20000"
-	serverRPCPort		 string = "30000"
+	serverRPCPort        string = "30000"
 	workers              []Worker
 	domainWorkerMap      map[string]Worker
 )
@@ -39,10 +39,11 @@ type Worker struct {
 }
 
 type WorkerLatency struct {
-	Worker Worker
+	Worker  Worker
 	Latency int
 }
 
+// RPC server type
 type MServer int
 
 // Request that client sends in RPC call to MServer.GetWorkers
@@ -74,20 +75,21 @@ type DomainsRes struct {
 	Domains []string // List of domain string
 }
 
+// Worker RPC server type
+type WorkerRPC int
 
-type WorkerRPC int 
-
+// Request that server sends in RPC call to WorkerRPC.GetLatency
 type LatencyReq struct {
-	URL string
+	URL     string
 	Samples int
 }
 
+// Request that server sends in RPC call to WorkerRPC.CrawlPage
 type CrawlPageReq struct {
 	Domain string
-	URL string
-	Depth int
+	URL    string
+	Depth  int
 }
-
 
 func main() {
 
@@ -99,30 +101,36 @@ func main() {
 
 	domainWorkerMap = make(map[string]Worker)
 
+	// listens for workers joining the system
 	go listenWorkers()
+	// listens for RPC calls from the workers
 	go listenRpcWorkers()
-
-	listenClients()
+	// listens for RPC calls from the client
+	listenClient()
 
 }
 
+// Returns to client the workers that have joined the system
 func (p *MServer) GetWorkers(req GetWorkersReq, resp *GetWorkersRes) error {
 	resp.WorkerIPsList = getWorkersIpList()
 	return nil
 }
 
+// Crawls a URL to a given depth, returns the workerIp with less latency to site
 func (p *MServer) Crawl(req CrawlReq, resp *CrawlRes) error {
 	workerOwnerIp := crawl(req)
 	*resp = CrawlRes{workerOwnerIp}
 	return nil
 }
 
+// Returns the domains that a given workerIp is responsible for
 func (p *MServer) Domains(req DomainsReq, resp *DomainsRes) error {
 	domains := getDomains(req)
 	*resp = DomainsRes{domains}
 	return nil
 }
 
+// Returns the domains that a given worker is responsible for
 func getDomains(req DomainsReq) (domainsList []string) {
 	for k := range domainWorkerMap {
 		if domainWorkerMap[k].Ip == req.WorkerIP {
@@ -132,6 +140,7 @@ func getDomains(req DomainsReq) (domainsList []string) {
 	return
 }
 
+// Returns all workerIp that have joined the server
 func getWorkersIpList() (list []string) {
 	for _, worker := range workers {
 		list = append(list, worker.Ip)
@@ -139,6 +148,8 @@ func getWorkersIpList() (list []string) {
 	return
 }
 
+// Ensures domain is mapped to closest worker and tells worker to crawl
+// Returns the ip of worker that owns the domain of Url
 func crawl(req CrawlReq) (workerIp string) {
 	domain := getDomain(req.URL)
 	var worker Worker
@@ -153,14 +164,15 @@ func crawl(req CrawlReq) (workerIp string) {
 	crawlPage(worker, domain, req)
 	workerIp = worker.Ip
 	return
-} 
+}
 
-// returns true if domain in domainWorkerMap
+// Returns true if domain has been processed by the server
 func isKnown(domain string) bool {
 	_, ok := domainWorkerMap[domain]
 	return ok
 }
 
+// Calls WorkerRPC.CrawlPage to worker responsible for domain
 func crawlPage(worker Worker, domain string, crawlReq CrawlReq) {
 	wIpPort := getWorkerIpPort(worker)
 	req := CrawlPageReq{domain, crawlReq.URL, crawlReq.Depth}
@@ -168,28 +180,31 @@ func crawlPage(worker Worker, domain string, crawlReq CrawlReq) {
 	client, err := rpc.Dial("tcp", wIpPort)
 	checkError("rpc.Dial in crawlPage()", err, true)
 	err = client.Call("WorkerRPC.CrawlPage", req, &resp)
-	checkError("client.Call(WorkerRPC.CrawlPage: ", err, true)	
+	checkError("client.Call(WorkerRPC.CrawlPage: ", err, true)
 	err = client.Close()
 	checkError("client.Close() in crawlPage(): ", err, true)
 	return
 }
 
+// Returns the domain of uri
 func getDomain(uri string) (domain string) {
 	u, err := url.Parse(uri)
-    checkError("Error in getDomain(), url.Parse():", err, true)
+	checkError("Error in getDomain(), url.Parse():", err, true)
 	domain = u.Host
-	return 
+	return
 }
 
+// Prepares domain for an http.GET call
 func getSchemeAndDomain(uri string) (schemeAndDomain string) {
 	u, err := url.Parse(uri)
-    checkError("Error in getSchemeAndDomain(), url.Parse():", err, true)
-    schemeAndDomain = u.Scheme + "://" + u.Host
-    return
+	checkError("Error in getSchemeAndDomain(), url.Parse():", err, true)
+	schemeAndDomain = u.Scheme + "://" + u.Host
+	return
 }
 
+// Compares network latencies of all workers to url, returns the closest
 func findClosestWorker(url string) (worker Worker) {
-	var workerLatencyList []WorkerLatency 
+	var workerLatencyList []WorkerLatency
 	for _, worker := range workers {
 		latency := getLatency(worker, url)
 		fmt.Println("Worker:", worker, "says latency is:", latency)
@@ -199,17 +214,18 @@ func findClosestWorker(url string) (worker Worker) {
 	return
 }
 
+// Returns worker with smallest previously computed network latency
 func closestWorker(workerLatencies []WorkerLatency) (worker Worker) {
 	workerLatency := workerLatencies[0]
-	for i:=1; i<len(workerLatencies); i++ {
+	for i := 1; i < len(workerLatencies); i++ {
 		if workerLatencies[i].Latency < workerLatency.Latency {
-			workerLatency = workerLatencies[i]	
+			workerLatency = workerLatencies[i]
 		}
 	}
 	return workerLatency.Worker
-} 
+}
 
-
+// Listens for joining workers
 func listenWorkers() {
 	ln, err := net.Listen("tcp", workerIncomingIpPort)
 	checkError("Error in listenWorkers(), net.Listen():", err, true)
@@ -221,6 +237,8 @@ func listenWorkers() {
 	}
 }
 
+// Adds joining workerIp to list and returns port to use as RPC server
+// and port to contact server with RPCs
 func joinWorker(conn net.Conn) {
 	workerIpPort := conn.RemoteAddr().String()
 	fmt.Println("joining Workers ip:", workerIpPort)
@@ -228,11 +246,12 @@ func joinWorker(conn net.Conn) {
 	workerIp := workerIpPort[:strings.Index(workerIpPort, ":")]
 
 	workers = append(workers, Worker{workerIp})
-	
-	fmt.Fprintf(conn, workerRPCPort + " " + serverRPCPort + "\n")
+
+	fmt.Fprintf(conn, workerRPCPort+" "+serverRPCPort+"\n")
 }
 
-func listenClients() {
+// Listens for RPC calls from client
+func listenClient() {
 	mServer := rpc.NewServer()
 	m := new(MServer)
 	mServer.Register(m)
@@ -250,6 +269,7 @@ func listenClients() {
 	}
 }
 
+// Listens for RPC calls from workers
 func listenRpcWorkers() {
 	mServer := rpc.NewServer()
 	m := new(MServer)
@@ -270,13 +290,15 @@ func listenRpcWorkers() {
 	}
 }
 
+// returns the ip:port to listen to worker RPCs on
 func getIpPortForRpcFromWorkers() (ipPort string) {
 	ipAndPort := strings.Split(workerIncomingIpPort, ":")
 
-	ipPort = ipAndPort[0] +":"+ serverRPCPort
+	ipPort = ipAndPort[0] + ":" + serverRPCPort
 	return
 }
 
+// Calls WorkerRPC.GetLatency RPC to given worker
 func getLatency(w Worker, url string) (latency int) {
 	wIpPort := getWorkerIpPort(w)
 	req := LatencyReq{url, samplesPerWorker}
@@ -289,11 +311,13 @@ func getLatency(w Worker, url string) (latency int) {
 	return
 }
 
+// Returns the ip:port that given worker is listening to RPCs on
 func getWorkerIpPort(w Worker) (s string) {
 	s = w.Ip + ":" + workerRPCPort
 	return
 }
 
+// Parses the command line arguments to server.go
 func ParseArguments() (err error) {
 	arguments := os.Args[1:]
 	if len(arguments) == 2 {

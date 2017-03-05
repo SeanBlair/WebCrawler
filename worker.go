@@ -4,6 +4,7 @@ import (
 	"bufio"
 	// "crypto/md5"
 	"fmt"
+	"golang.org/x/net/html"
 	"io/ioutil"
 	"log"
 	"net"
@@ -14,39 +15,49 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"golang.org/x/net/html"
 )
 
 var (
+	// for listening to RPCs
 	portForRPC string
-	serverIpPort     string
+	// for joining with the server
+	serverIpPort string
+	// for sending RPCs to the server
 	serverRpcPort string
-	//  domain : url : Page
+	//  maps domains to urls which map to page data
 	// TODO make sure thread safe as is map
 	domains map[string]map[string]Page
 )
 
+// A webpage
 type Page struct {
+	// -1 if not crawled, 0 if all links set,
+	// greater depending on how far crawled.
 	DepthCrawled int
+	// Urls that page links to
 	Links []string
 }
 
+// The server RPC type
 type MServer int
 
+// The worker RPC type
 type WorkerRPC int
 
+// Request that server sends in WorkerRPC.GetLatency RPC call
 type LatencyReq struct {
-	URL string
-	Samples int
+	URL     string // Top level domain page
+	Samples int    // Number of latency samples to take
 }
 
+// Request that server sends in WorkerRPC.CrawlPage RPC call
 type CrawlPageReq struct {
-	Domain string
-	URL string
-	Depth int
+	Domain string // Domain of URL
+	URL    string // Page to crawl
+	Depth  int    // Depth to crawl
 }
 
-// Request that client sends in RPC call to MServer.Crawl
+// Request that worker sends in RPC call to MServer.Crawl
 type CrawlReq struct {
 	URL   string // URL of the website to crawl
 	Depth int    // Depth to crawl to from URL
@@ -74,12 +85,14 @@ func main() {
 	listen(":" + portForRPC)
 }
 
+// Returns min latency from worker to given domain
 func (p *WorkerRPC) GetLatency(req LatencyReq, latency *int) error {
 	fmt.Println("received call to GetLatency()")
 	*latency = getLatency(req)
 	return nil
 }
 
+// Crawls page to given depth
 func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	fmt.Println("received call to CrawlPage() with req:", req)
 	initCrawl(req)
@@ -87,6 +100,7 @@ func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	return nil
 }
 
+// Verifies that page is in domains map
 func initCrawl(req CrawlPageReq) {
 	fmt.Println("domains before initCrawl() processes:", domains)
 
@@ -105,10 +119,11 @@ func initCrawl(req CrawlPageReq) {
 	crawlPage(req)
 }
 
+// Crawls page and links to given depth
 // requires entry in domains[req.Domain][req.Url] : Page{x, y}
 func crawlPage(req CrawlPageReq) {
 	page := domains[req.Domain][req.URL]
-	// need to crawl deeper 
+	// need to crawl deeper
 	if req.Depth > page.DepthCrawled {
 		// never crawled, so links unknown
 		if page.DepthCrawled == -1 {
@@ -127,7 +142,7 @@ func crawlPage(req CrawlPageReq) {
 		for _, link := range page.Links {
 			linkDomain := getDomain(link)
 			if !isMyDomain(linkDomain) {
-				serverCrawl(link, req.Depth - 1)
+				serverCrawl(link, req.Depth-1)
 			} else {
 				initCrawl(CrawlPageReq{linkDomain, link, req.Depth - 1})
 			}
@@ -138,12 +153,12 @@ func crawlPage(req CrawlPageReq) {
 	}
 }
 
+// Calls server to initiate a crawl of a page in a domain that
+// this worker currently does not own.
 func serverCrawl(url string, depth int) {
 	req := CrawlReq{url, depth}
 	var resp CrawlRes
 
-	// for running locally, TODO eliminate!
-	// client, err := rpc.Dial("tcp", "localhost:30000")
 	client, err := rpc.Dial("tcp", getServerRpcIpPort())
 
 	checkError("rpc.Dial in serverCrawl()", err, true)
@@ -154,24 +169,29 @@ func serverCrawl(url string, depth int) {
 	checkError("client.Close() in serverCrawl(): ", err, true)
 }
 
+// Returns ip:port of server listening to worker RPCs
+// TODO set as global variable instead of recomputing.
 func getServerRpcIpPort() (ipPort string) {
 	ipAndPort := strings.Split(serverIpPort, ":")
 	ipPort = ipAndPort[0] + ":" + serverRpcPort
 	return
 }
 
+// Returns true if domain is in domains map
 func isMyDomain(domain string) bool {
 	_, ok := domains[domain]
 	return ok
 }
 
+// Returns the domain of uri
 func getDomain(uri string) (domain string) {
 	u, err := url.Parse(uri)
-    checkError("Error in getDomain(), url.Parse():", err, true)
+	checkError("Error in getDomain(), url.Parse():", err, true)
 	domain = u.Host
-	return 
+	return
 }
 
+// Returns a list of valid urls linked from given uri
 func parseLinks(uri string) (links []string) {
 	htmlString := getHtmlString(uri)
 	urls := getAllLinks(htmlString)
@@ -181,6 +201,7 @@ func parseLinks(uri string) (links []string) {
 	return
 }
 
+// Turns any relative urls into complete urls
 func fixRelativeUrls(baseUrl string, relativeUrls []string) (urls []string) {
 	base, err := url.Parse(baseUrl)
 	checkError("Error in fixRelativeUrls(), url.Parse("+baseUrl+"):", err, true)
@@ -192,29 +213,31 @@ func fixRelativeUrls(baseUrl string, relativeUrls []string) (urls []string) {
 	return
 }
 
+// Returns the values of all <a/> link html tags
 func getAllLinks(htmlString string) (urls []string) {
 	doc, err := html.Parse(strings.NewReader(htmlString))
 	checkError("Error in setAllLinks(), html.Parse():", err, true)
-	
-	// based on https://godoc.org/golang.org/x/net/html#example-Parse	
+
+	// based on https://godoc.org/golang.org/x/net/html#example-Parse
 	var f func(*html.Node)
 	f = func(n *html.Node) {
-    	if n.Type == html.ElementNode && n.Data == "a" {
-        	for _, a := range n.Attr {
-            	if a.Key == "href" {
-                	urls = append(urls, a.Val)
-                	break
-            	}
-        	}
-    	}
-    	for c := n.FirstChild; c != nil; c = c.NextSibling {
-        	f(c)
-    	}
+		if n.Type == html.ElementNode && n.Data == "a" {
+			for _, a := range n.Attr {
+				if a.Key == "href" {
+					urls = append(urls, a.Val)
+					break
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
 	}
 	f(doc)
 	return
 }
 
+// Returns the complete html of a given uri
 func getHtmlString(uri string) (htmlString string) {
 	res, err := http.Get(uri)
 	checkError("Error in getHtmlString(), http.Get():", err, true)
@@ -225,7 +248,7 @@ func getHtmlString(uri string) (htmlString string) {
 	return
 }
 
-
+// Pings a site samples times and returns the minimum
 func getLatency(req LatencyReq) (latency int) {
 	var latencyList []int
 
@@ -236,24 +259,25 @@ func getLatency(req LatencyReq) (latency int) {
 
 	sort.Ints(latencyList)
 	fmt.Println("latencyList after sorting:", latencyList)
-	
+
 	latency = latencyList[0]
 	return
 }
 
+// Pings a http.GET call and returns the time it takes in milliseconds
 func pingSite(uri string) (latency int) {
 	start := time.Now()
 	_, err := http.Get(uri)
 	elapsed := time.Since(start)
 
 	checkError("Error in pingSiteOnce(), http.Get():", err, true)
-	
+
 	latency = int(elapsed / time.Millisecond)
 
 	return latency
 }
 
-
+// Listens for RPC calls from the server
 func listen(ipPort string) {
 	wServer := rpc.NewServer()
 	w := new(WorkerRPC)
@@ -271,7 +295,8 @@ func listen(ipPort string) {
 	}
 }
 
-
+// Calls the server to join the system, gets ports to use
+// as RPC server and to contact the server through RPC calls
 func join() {
 
 	conn, err := net.Dial("tcp", serverIpPort)
@@ -289,6 +314,7 @@ func join() {
 	serverRpcPort = message[1]
 }
 
+// Parses the command line arguments of worker.go
 func ParseArguments() (err error) {
 	arguments := os.Args[1:]
 	if len(arguments) == 1 {
