@@ -141,21 +141,27 @@ func getWorkersIpList() (list []string) {
 
 func crawl(req CrawlReq) (workerIp string) {
 	domain := getDomain(req.URL)
-	fmt.Println("domain:", domain)
+	var worker Worker
 	// TODO check if already in domainWorkerMap.
-	// if so, no need to do:
-	schemeAndDomain := getSchemeAndDomain(req.URL)
-	fmt.Println("schemeAndDomain:", schemeAndDomain)
-	worker := findClosestWorker(schemeAndDomain)
-	fmt.Println("url:", req.URL)
-	domainWorkerMap[domain] = worker
-	fmt.Println("domainWorkerMap:", domainWorkerMap)
-	/// ..........................
-
+	if isKnown(domain) {
+		worker = domainWorkerMap[domain]
+	} else {
+		schemeAndDomain := getSchemeAndDomain(req.URL)
+		worker = findClosestWorker(schemeAndDomain)
+		domainWorkerMap[domain] = worker
+		fmt.Println("domainWorkerMap:", domainWorkerMap)
+	}
+	// TODO not spawn thread to make sure client waits until finished crawling?
 	go crawlPage(worker, domain, req)
 	workerIp = worker.Ip
 	return
 } 
+
+// returns true if domain in domainWorkerMap
+func isKnown(domain string) bool {
+	_, ok := domainWorkerMap[domain]
+	return ok
+}
 
 func crawlPage(worker Worker, domain string, crawlReq CrawlReq) {
 	wIpPort := getWorkerIpPort(worker)

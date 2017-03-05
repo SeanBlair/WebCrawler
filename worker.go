@@ -82,6 +82,8 @@ func (p *WorkerRPC) GetLatency(req LatencyReq, latency *int) error {
 
 func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	fmt.Println("received call to CrawlPage() with req:", req)
+	// TODO  not spawn thread to make sure server waits till 
+	// crawling is done before returning to client??
 	go initCrawl(req)
 	*success = true
 	return nil
