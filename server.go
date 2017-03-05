@@ -19,7 +19,7 @@ import (
 	"net/rpc"
 	"net/url"
 	"os"
-	"strconv"
+	// "strconv"
 	"strings"
 	// "time"
 )
@@ -28,7 +28,8 @@ var (
 	workerIncomingIpPort string
 	clientIncomingIpPort string
 	samplesPerWorker 	 int = 5
-	workerRPCPort        int = 20000
+	workerRPCPort        string = "20000"
+	serverRPCPort		 string = "30000"
 	workers              []Worker
 	domainWorkerMap      map[string]Worker
 )
@@ -123,14 +124,11 @@ func (p *MServer) Domains(req DomainsReq, resp *DomainsRes) error {
 }
 
 func getDomains(req DomainsReq) (domainsList []string) {
-	wIpPort := getWorkerIpPort(Worker{req.WorkerIP})
-	getDomReq := true
-	client, err := rpc.Dial("tcp", wIpPort)
-	checkError("rpc.Dial in getDomains()", err, true)
-	err = client.Call("WorkerRPC.GetDomains", getDomReq, &domainsList)
-	checkError("client.Call(WorkerRPC.GetDomains in getDomains(): ", err, true)	
-	err = client.Close()
-	checkError("client.Close() in getDomains(): ", err, true)
+	for k := range domainWorkerMap {
+		if domainWorkerMap[k].Ip == req.WorkerIP {
+			domainsList = append(domainsList, k)
+		}
+	}
 	return
 }
 
@@ -144,12 +142,16 @@ func getWorkersIpList() (list []string) {
 func crawl(req CrawlReq) (workerIp string) {
 	domain := getDomain(req.URL)
 	fmt.Println("domain:", domain)
+	// TODO check if already in domainWorkerMap.
+	// if so, no need to do:
 	schemeAndDomain := getSchemeAndDomain(req.URL)
 	fmt.Println("schemeAndDomain:", schemeAndDomain)
 	worker := findClosestWorker(schemeAndDomain)
 	fmt.Println("url:", req.URL)
 	domainWorkerMap[domain] = worker
 	fmt.Println("domainWorkerMap:", domainWorkerMap)
+	/// ..........................
+
 	go crawlPage(worker, domain, req)
 	workerIp = worker.Ip
 	return
@@ -223,7 +225,7 @@ func joinWorker(conn net.Conn) {
 
 	workers = append(workers, Worker{workerIp})
 	
-	fmt.Fprintf(conn, strconv.Itoa(workerRPCPort) + " " + getIpPortForRpcFromWorkers() + "\n")
+	fmt.Fprintf(conn, workerRPCPort + " " + serverRPCPort + "\n")
 }
 
 func listenClients() {
@@ -248,8 +250,8 @@ func listenRpcWorkers() {
 	mServer := rpc.NewServer()
 	m := new(MServer)
 	mServer.Register(m)
-	// l, err := net.Listen("tcp", clientIncomingIpPort)
 	ipPort := getIpPortForRpcFromWorkers()
+
 	l, err := net.Listen("tcp", ipPort)
 	if err != nil {
 		panic(err)
@@ -266,7 +268,8 @@ func listenRpcWorkers() {
 
 func getIpPortForRpcFromWorkers() (ipPort string) {
 	ipAndPort := strings.Split(workerIncomingIpPort, ":")
-	ipPort = ipAndPort[0] +":"+ strconv.Itoa(workerRPCPort+1)
+
+	ipPort = ipAndPort[0] +":"+ serverRPCPort
 	return
 }
 
@@ -283,7 +286,7 @@ func getLatency(w Worker, url string) (latency int) {
 }
 
 func getWorkerIpPort(w Worker) (s string) {
-	s = w.Ip + ":" + strconv.Itoa(workerRPCPort)
+	s = w.Ip + ":" + workerRPCPort
 	return
 }
 
@@ -292,8 +295,6 @@ func ParseArguments() (err error) {
 	if len(arguments) == 2 {
 		workerIncomingIpPort = arguments[0]
 		clientIncomingIpPort = arguments[1]
-		// for testing TODO eliminate
-		// website = arguments[2]
 	} else {
 		err = fmt.Errorf("Usage: {go run server.go [worker-incoming ip:port] [client-incoming ip:port]}")
 		return

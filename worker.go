@@ -20,7 +20,7 @@ import (
 var (
 	portForRPC string
 	serverIpPort     string
-	serverRpcIpPort string
+	serverRpcPort string
 	//  domain : url : Page
 	// TODO make sure thread safe as is map
 	domains map[string]map[string]Page
@@ -68,7 +68,7 @@ func main() {
 
 	join()
 
-	fmt.Println("Successfully joined. Server:", serverIpPort, "RPCport:", portForRPC)
+	fmt.Println("Successfully joined. Server:", serverIpPort, "RPCport:", portForRPC, "serverRpcPort:", serverRpcPort)
 
 	// listen on own ip and port provided by server
 	listen(":" + portForRPC)
@@ -87,31 +87,16 @@ func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	return nil
 }
 
-func (p *WorkerRPC) GetDomains(req bool, domainsReq *[]string) error {
-	fmt.Println("received call to GetDomains()")
-	*domainsReq = getDomains()
-	return nil
-}
-
-func getDomains() (domainsList []string) {
-	for k := range domains {
-    	domainsList = append(domainsList, k)
-	}
-	return
-}
-
 func initCrawl(req CrawlPageReq) {
 	fmt.Println("domains before initCrawl() processes:", domains)
 
 	// make sure domain exists
 	_, ok := domains[req.Domain]
-	// TODO mutex??
 	if !ok {
 		domains[req.Domain] = make(map[string]Page)
 	}
 	// make sure page exists
 	_, ok = domains[req.Domain][req.URL]
-	// TODO mutex??
 	if !ok {
 		domains[req.Domain][req.URL] = Page{-1, nil}
 	}
@@ -156,19 +141,12 @@ func crawlPage(req CrawlPageReq) {
 }
 
 func serverCrawl(url string, depth int) {
-	// need to call serverRpcIpPort
-	// fmt.Println("Calling CrawlServer.Crawl using serverRpcIpPort:", serverRpcIpPort)
-
-	// raddr, err := net.ResolveTCPAddr("tcp", serverRpcIpPort)
-	// checkError("Error in serverCrawl(), net.ResolveTCPAddr():", err, true)
-
 	req := CrawlReq{url, depth}
 	var resp CrawlRes
-	// client, err := rpc.Dial("tcp", raddr.String())
-	// conn, err := net.DialTCP("tcp", nil, raddr)
-	// client, err := rpc.Dial("tcp", "localhost:2223")
-	// client := rpc.NewClient(conn)
-	client, err := rpc.Dial("tcp", serverRpcIpPort)
+
+	// for running locally, TODO eliminate!
+	// client, err := rpc.Dial("tcp", "localhost:30000")
+	client, err := rpc.Dial("tcp", getServerRpcIpPort())
 
 	checkError("rpc.Dial in serverCrawl()", err, true)
 	err = client.Call("MServer.Crawl", req, &resp)
@@ -178,17 +156,11 @@ func serverCrawl(url string, depth int) {
 	checkError("client.Close() in serverCrawl(): ", err, true)
 }
 
-// raddr, err := net.ResolveTCPAddr("tcp", serverIpPort)
-// 	if err != nil {
-// 		logger.Fatal(err)
-// 	}
-// 	conn, err := net.DialTCP("tcp", nil, raddr)
-// 	if err != nil {
-// 		logger.Fatal(err)
-// 	}
-// 	client := rpc.NewClient(conn)
-
-
+func getServerRpcIpPort() (ipPort string) {
+	ipAndPort := strings.Split(serverIpPort, ":")
+	ipPort = ipAndPort[0] + ":" + serverRpcPort
+	return
+}
 
 func isMyDomain(domain string) bool {
 	_, ok := domains[domain]
@@ -316,9 +288,7 @@ func join() {
 
 	// portForRPC = strings.Trim(port, " ")
 	portForRPC = message[0]
-	serverRpcIpPort = message[1]
-	fmt.Println("Successful in joining server")
-	fmt.Println("My portForWorkerRPC is:", portForRPC, "and my serverRpcIpPort is:", serverRpcIpPort)
+	serverRpcPort = message[1]
 }
 
 func ParseArguments() (err error) {
