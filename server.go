@@ -142,7 +142,6 @@ func getWorkersIpList() (list []string) {
 func crawl(req CrawlReq) (workerIp string) {
 	domain := getDomain(req.URL)
 	var worker Worker
-	// TODO check if already in domainWorkerMap.
 	if isKnown(domain) {
 		worker = domainWorkerMap[domain]
 	} else {
@@ -151,8 +150,7 @@ func crawl(req CrawlReq) (workerIp string) {
 		domainWorkerMap[domain] = worker
 		fmt.Println("domainWorkerMap:", domainWorkerMap)
 	}
-	// TODO not spawn thread to make sure client waits until finished crawling?
-	go crawlPage(worker, domain, req)
+	crawlPage(worker, domain, req)
 	workerIp = worker.Ip
 	return
 } 

@@ -82,9 +82,7 @@ func (p *WorkerRPC) GetLatency(req LatencyReq, latency *int) error {
 
 func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	fmt.Println("received call to CrawlPage() with req:", req)
-	// TODO  not spawn thread to make sure server waits till 
-	// crawling is done before returning to client??
-	go initCrawl(req)
+	initCrawl(req)
 	*success = true
 	return nil
 }
@@ -129,9 +127,7 @@ func crawlPage(req CrawlPageReq) {
 		for _, link := range page.Links {
 			linkDomain := getDomain(link)
 			if !isMyDomain(linkDomain) {
-				// TODO implement
 				serverCrawl(link, req.Depth - 1)
-				fmt.Println("TODO, need to call serverCrawl for url:", link)
 			} else {
 				initCrawl(CrawlPageReq{linkDomain, link, req.Depth - 1})
 			}
