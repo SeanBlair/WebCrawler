@@ -100,8 +100,7 @@ type OverlapReq struct {
 
 // Response to MServer.Overlap
 type OverlapRes struct {
-	URL1 string // URL arg to Overlap
-	URL2 string // The other URL arg to Overlap
+	NumPages int // Computed overlap between two URLs
 }
 
 /////////////// /RPC structs
