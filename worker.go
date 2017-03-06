@@ -27,6 +27,12 @@ var (
 	//  maps domains to urls which map to page data
 	// TODO make sure thread safe as is map
 	domains map[string]map[string]Page
+	// Contains urls (keys) of pages already visited in
+	// DFS traversal of a network of pages.
+	visitedForOverlap map[string]bool		// for computeOverlap call
+	visitedForIsReachable map[string]bool	// for isReachable call
+	// Number of overlaps found so far in call to ComputeOverlap
+	numOverlapPages int
 )
 
 // A webpage
@@ -36,6 +42,11 @@ type Page struct {
 	DepthCrawled int
 	// Urls that page links to
 	Links []string
+}
+
+// A worker
+type Worker struct {
+	Ip string
 }
 
 // The server RPC type
@@ -68,6 +79,21 @@ type CrawlRes struct {
 	WorkerIP string // workerIP
 }
 
+// Request that server sends in WorkerRPC.ComputeOverlap RPC call
+type ComputeOverlapReq struct {
+	OwnerURL1 Worker 	// Worker to perform overlap computation
+	URL1 string 		// Site to start search of URL2's domain from
+	OwnerURL2 Worker 	// Owner of domain of URL2
+	URL2 string 		// Site to start search for possible entry
+}						// point of URL2's domain accessed through URL1
+
+// Request that worker sends in WorkerRPC.IsReachable RPC call
+type IsReachableReq struct {
+	StartURL string
+	TargetURL string
+	Domain string
+}
+
 func main() {
 
 	err := ParseArguments()
@@ -98,6 +124,116 @@ func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 	initCrawl(req)
 	*success = true
 	return nil
+}
+
+// Returns the number of pages that overlap between 2 domains from given entry-points
+func (p *WorkerRPC) ComputeOverlap(req ComputeOverlapReq, numPages *int) error {
+	fmt.Println("received call to ComputeOverlap() with req:", req)
+	*numPages = computeOverlap(req)
+	return nil
+}
+
+// Returns true if TargetURL is reachable from StartURL
+func (p *WorkerRPC) IsReachable(req IsReachableReq, answer *bool) error {
+	fmt.Println("received call to IsReachable() with req:", req)
+	visitedForIsReachable = make(map[string]bool)
+	*answer = isReachable(req.StartURL, req.TargetURL, req.Domain)
+	return nil
+}
+
+// Using DFS starting at URL1, recursively looks for entry points to the domain of URL2
+// If found, query worker owner of URL2 if the entry point page is accessible from URL2
+// If accessible, increment numPages by one. Continue until all pages accessible
+// from URL1 have been checked. Return total number of overlaps found.
+func computeOverlap(req ComputeOverlapReq) (numPages int) {
+	// set global variables
+	visitedForOverlap = make(map[string]bool)
+	numOverlapPages = 0
+
+	thisDomain := getDomain(req.URL1)
+	targetDomain := getDomain(req.URL2)
+	ownerURL2Ip := req.OwnerURL2.Ip
+
+	findEntryPoint(req.URL1, thisDomain, targetDomain, req.URL2, ownerURL2Ip)
+	numPages = numOverlapPages
+	return
+}
+
+// Recursively traverses thisDomain starting at url1 in search of a link from targetDomain.
+// If found, determines if link is reachable from url2, by asking ownerURL2.
+// Updates the visited map and the numOverlapPages global variables.
+func findEntryPoint(url1 string, thisDomain string, targetDomain string, url2 string, ownerUrl2Ip string) {
+	visitedForOverlap[url1] = true
+	thisPage := domains[thisDomain][url1]
+	for _, link := range thisPage.Links {
+		if isVisited(link, visitedForOverlap) {
+			continue
+		} else {
+			linkDomain := getDomain(link)
+			if linkDomain == targetDomain {
+				if link == url2 {
+					numOverlapPages++
+				} else {
+					if isLinkReachableFrom(url2, link, targetDomain, ownerUrl2Ip) {
+					numOverlapPages++
+					}
+				}
+			} else {
+				if linkDomain == thisDomain {
+					findEntryPoint(link, thisDomain, targetDomain, url2, ownerUrl2Ip)
+				}
+			}
+		}
+	}
+	return
+}
+
+// Returns true if targetUrl is reachable from startUrl, either by RPC if not own domain or locally otherwise
+func isLinkReachableFrom(startUrl string, targetUrl string, domain string, domainOwnerIp string) bool {
+	if isMyDomain(domain) {
+		visitedForIsReachable = make(map[string]bool)
+		return isReachable(startUrl, targetUrl, domain)
+	} else {
+		return isReachableRPC(startUrl, targetUrl, domain, domainOwnerIp)
+	}
+}
+
+func isReachableRPC(startUrl string, targetUrl string, domain string, domainOwnerIp string) (isReachable bool) {
+	req := IsReachableReq{startUrl, targetUrl, domain}
+	client, err := rpc.Dial("tcp", domainOwnerIp + ":" + portForRPC)
+	checkError("rpc.Dial in isReachableRPC()", err, true)
+	err = client.Call("WorkerRPC.IsReachable", req, &isReachable)
+	checkError("client.Call(WorkerRPC.IsReachable) in isReachableRPC(): ", err, true)
+	err = client.Close()
+	checkError("client.Close() in isReachableRPC(): ", err, true)
+	return
+}
+
+// Using recursive DFS, traverses network until either finding targetUrl
+// and returning true or returning false if targetUrl not in network
+func isReachable(startUrl string, targetUrl string, domain string) bool {
+	if startUrl == targetUrl {
+		return true
+	} else {
+		visitedForIsReachable[startUrl] = true
+		page := domains[domain][startUrl]
+		for _, link := range page.Links {
+			if isVisited(link, visitedForIsReachable) {
+				continue
+			} else {
+				if isReachable(link, targetUrl, domain) {
+				return true
+				}
+			}
+		}
+		return false
+	}
+}
+
+// Returns true if visited contains key url
+func isVisited(url string, visited map[string]bool) bool {
+	_, ok := visited[url]
+	return ok
 }
 
 // Verifies that page is in domains map
@@ -141,10 +277,10 @@ func crawlPage(req CrawlPageReq) {
 		// by some worker.
 		for _, link := range page.Links {
 			linkDomain := getDomain(link)
-			if !isMyDomain(linkDomain) {
-				serverCrawl(link, req.Depth-1)
-			} else {
+			if isMyDomain(linkDomain) {
 				initCrawl(CrawlPageReq{linkDomain, link, req.Depth - 1})
+			} else {
+				serverCrawl(link, req.Depth-1)
 			}
 		}
 		// already crawled deep enough

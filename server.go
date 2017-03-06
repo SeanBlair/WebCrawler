@@ -75,21 +75,40 @@ type DomainsRes struct {
 	Domains []string // List of domain string
 }
 
+// Request that client sends in RPC call to MServer.Overlap
+type OverlapReq struct {
+	URL1 string // URL arg to Overlap
+	URL2 string // The other URL arg to Overlap
+}
+
+// Response to MServer.Overlap
+type OverlapRes struct {
+	NumPages int // Computed overlap between two URLs
+}
+
 // Worker RPC server type
 type WorkerRPC int
 
 // Request that server sends in RPC call to WorkerRPC.GetLatency
 type LatencyReq struct {
-	URL     string
-	Samples int
+	URL     string 	// Site to compute latency of
+	Samples int   	// Number of measurents to take
 }
 
 // Request that server sends in RPC call to WorkerRPC.CrawlPage
 type CrawlPageReq struct {
-	Domain string
-	URL    string
-	Depth  int
+	Domain string 	// Domain of URL
+	URL    string 	// Site to crawl
+	Depth  int 		// Depth to crawl URL
 }
+
+// Request that server sends in RPC call to WorkerRPC.ComputeOverlap
+type ComputeOverlapReq struct {
+	OwnerURL1 Worker 	// Worker to perform overlap computation
+	URL1 string 		// Site to start search of URL2's domain from
+	OwnerURL2 Worker 	// Owner of domain of URL2
+	URL2 string 		// Site to start search for entry point
+}						// of URL2's domain accessed through URL1
 
 func main() {
 
@@ -128,6 +147,42 @@ func (p *MServer) Domains(req DomainsReq, resp *DomainsRes) error {
 	domains := getDomains(req)
 	*resp = DomainsRes{domains}
 	return nil
+}
+
+// Returns the overlap in the web-graph between urls from different domains
+func (p *MServer) Overlap(req OverlapReq, resp *OverlapRes) error {
+	numPages := getOverlap(req)
+	*resp = OverlapRes{numPages}
+	return nil
+}
+
+// Determines wokers to process request, requests the computation and returns the overlap
+func getOverlap(request OverlapReq) (numPages int) {
+	worker1 := getOwner(request.URL1)
+	worker2 := getOwner(request.URL2)
+	numPages = computeOverlap(worker1, request.URL1, worker2, request.URL2)
+	numPages += computeOverlap(worker2, request.URL2, worker1, request.URL1)
+	return
+}
+
+// Calls ownerUrl1 worker's WorkerRPC.ComputeOverlap RPC, returns overlap between url1 and url2
+func computeOverlap(ownerUrl1 Worker, url1 string, ownerUrl2 Worker, url2 string) (numPages int) {
+	wIpPort := getWorkerIpPort(ownerUrl1)
+	req := ComputeOverlapReq{ownerUrl1, url1, ownerUrl2, url2}
+	client, err := rpc.Dial("tcp", wIpPort)
+	checkError("rpc.Dial in computeOverlap()", err, true)
+	err = client.Call("WorkerRPC.ComputeOverlap", req, &numPages)
+	checkError("client.Call(WorkerRPC.ComputeOverlap: ", err, true)
+	err = client.Close()
+	checkError("client.Close() in computeOverlap(): ", err, true)
+	return
+}
+
+// Returns worker responsible for the domain of the given url
+func getOwner(url string) (worker Worker) {
+	domain := getDomain(url)
+	worker = domainWorkerMap[domain]
+	return
 }
 
 // Returns the domains that a given worker is responsible for
