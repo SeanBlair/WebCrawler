@@ -320,7 +320,6 @@ func crawlPage(req CrawlPageReq) {
 func serverCrawl(url string, depth int) {
 	req := CrawlReq{url, depth}
 	var resp CrawlRes
-
 	client, err := rpc.Dial("tcp", getServerRpcIpPort())
 
 	checkError("rpc.Dial in serverCrawl()", err, true)
@@ -537,7 +536,7 @@ func join() {
 
 	// portForRPC = strings.Trim(port, " ")
 	portForRPC = message[0]
-	serverRpcPort = message[1]
+	serverRpcPort = strings.Replace(message[1], "\n", "", -1)
 }
 
 // Parses the command line arguments of worker.go
