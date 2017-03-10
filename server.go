@@ -105,6 +105,7 @@ type CrawlPageReq struct {
 
 // Request that server sends in RPC call to WorkerRPC.ComputeOverlap
 type ComputeOverlapReq struct {
+	FullOverlap bool
 	OwnerURL1 Worker 	// Worker to perform overlap computation
 	URL1 string 		// Site to start search of URL2's domain from
 	OwnerURL2 Worker 	// Owner of domain of URL2
@@ -163,14 +164,13 @@ func getOverlap(request OverlapReq) (numPages int) {
 	worker1 := getOwner(request.URL1)
 	worker2 := getOwner(request.URL2)
 	numPages = computeOverlap(worker1, request.URL1, worker2, request.URL2)
-	numPages += computeOverlap(worker2, request.URL2, worker1, request.URL1)
 	return
 }
 
 // Calls ownerUrl1 worker's WorkerRPC.ComputeOverlap RPC, returns overlap between url1 and url2
 func computeOverlap(ownerUrl1 Worker, url1 string, ownerUrl2 Worker, url2 string) (numPages int) {
 	wIpPort := getWorkerIpPort(ownerUrl1)
-	req := ComputeOverlapReq{ownerUrl1, url1, ownerUrl2, url2}
+	req := ComputeOverlapReq{true, ownerUrl1, url1, ownerUrl2, url2}
 	client, err := rpc.Dial("tcp", wIpPort)
 	checkError("rpc.Dial in computeOverlap()", err, true)
 	err = client.Call("WorkerRPC.ComputeOverlap", req, &numPages)
@@ -195,9 +195,6 @@ func getDomains(req DomainsReq) (domainsList []string) {
 			domainsList = append(domainsList, k)
 			}	
 		}
-		// if domainWorkerMap[k].Ip == req.WorkerIP {
-		// 	domainsList = append(domainsList, k)
-		// }
 	}
 	return
 }

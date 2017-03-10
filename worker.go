@@ -81,13 +81,14 @@ type CrawlRes struct {
 	WorkerIP string // workerIP
 }
 
-// Request that server sends in WorkerRPC.ComputeOverlap RPC call
+// Request that server sends in RPC call to WorkerRPC.ComputeOverlap
 type ComputeOverlapReq struct {
+	FullOverlap bool
 	OwnerURL1 Worker 	// Worker to perform overlap computation
 	URL1 string 		// Site to start search of URL2's domain from
 	OwnerURL2 Worker 	// Owner of domain of URL2
-	URL2 string 		// Site to start search for possible entry
-}						// point of URL2's domain accessed through URL1
+	URL2 string 		// Site to start search for entry point
+}						// of URL2's domain accessed through URL1
 
 // Request that worker sends in WorkerRPC.IsReachable RPC call
 type IsReachableReq struct {
@@ -130,7 +131,7 @@ func (p *WorkerRPC) CrawlPage(req CrawlPageReq, success *bool) error {
 
 // Returns the number of pages that overlap between 2 domains from given entry-points
 func (p *WorkerRPC) ComputeOverlap(req ComputeOverlapReq, numPages *int) error {
-	fmt.Println("received call to ComputeOverlap() with req:", req)
+	fmt.Println("Received call to ComputeOverlap() with req:", req)
 	*numPages = computeOverlap(req)
 	return nil
 }
@@ -151,13 +152,31 @@ func computeOverlap(req ComputeOverlapReq) (numPages int) {
 	// set global variables
 	visitedForOverlap = make(map[string]bool)
 	numOverlapPages = 0
-
 	thisDomain := getDomain(req.URL1)
 	targetDomain := getDomain(req.URL2)
 	ownerURL2Ip := req.OwnerURL2.Ip
-
 	findEntryPoint(req.URL1, thisDomain, targetDomain, req.URL2, ownerURL2Ip)
 	numPages = numOverlapPages
+	if req.FullOverlap {
+		numPages += computePartialOverlap(req)
+	}
+	return
+}
+
+// Call Worker owner of URL to get a partial overlap 
+func computePartialOverlap(req ComputeOverlapReq) (numPages int) {
+	request := ComputeOverlapReq{false, req.OwnerURL2, req.URL2, req.OwnerURL1, req.URL1}
+	// This worker owns domain of URL2
+	if req.OwnerURL1.Ip == req.OwnerURL2.Ip {
+		numPages = computeOverlap(request)
+	} else {
+		client, err := rpc.Dial("tcp", req.OwnerURL2.Ip + ":" + portForRPC)
+		checkError("rpc.Dial in computePartialOverlap()", err, true)
+		err = client.Call("WorkerRPC.ComputeOverlap", request, &numPages)
+		checkError("client.Call(WorkerRPC.ComputeOverlap in computePartialOverlap(): ", err, true)
+		err = client.Close()
+		checkError("client.Close() in computeOverlap(), computePartialOverlap(): ", err, true)
+	}
 	return
 }
 
