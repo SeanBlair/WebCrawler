@@ -33,6 +33,8 @@ var (
 	visitedForIsReachable map[string]bool	// for isReachable call
 	// Number of overlaps found so far in call to ComputeOverlap
 	numOverlapPages int
+	// seconds to wait for http Get response
+	httpGetTimeout int = 30
 )
 
 // A webpage
@@ -263,11 +265,16 @@ func crawlPage(req CrawlPageReq) {
 	if req.Depth > page.DepthCrawled {
 		// links unknown
 		if page.DepthCrawled == 0 {
-			page.Links = parseLinks(req.URL)
+			links, err := parseLinks(req.URL)
+			// Error reading page, no use to crawl deeper
+			if err != nil {
+				domains[req.Domain][req.URL] = page	
+				return
+			}
+			page.Links = links
 		}
 		// previously crawled but to lesser depth
 		page.DepthCrawled = req.Depth
-
 		// set page with updated depth and correct links
 		// TODO mutex??
 		domains[req.Domain][req.URL] = page
@@ -328,15 +335,19 @@ func getDomain(uri string) (domain string) {
 }
 
 // Returns a list of valid urls linked from given uri
-func parseLinks(uri string) (links []string) {
-	htmlString := getHtmlString(uri)
-	urls := getAllLinks(htmlString)
-	fmt.Println("Urls returned from getAllLinks() in parseLinks():", urls)
-	allLinks := fixRelativeUrls(uri, urls)
-	validLinks := filterHttpAndHtmlLinks(allLinks)
-	links = eliminateDuplicates(validLinks)
-	fmt.Println("Urls after fixed with fixRelativeUrls():", links)
-	return
+func parseLinks(uri string) (links []string, err error) {
+	htmlString, err := getHtmlString(uri)
+	if err != nil {
+		return nil, err
+	} else {
+		urls := getAllLinks(htmlString)
+		fmt.Println("Urls returned from getAllLinks() in parseLinks():", urls)
+		allLinks := fixRelativeUrls(uri, urls)
+		validLinks := filterHttpAndHtmlLinks(allLinks)
+		links = eliminateDuplicates(validLinks)
+		fmt.Println("Urls after fixed with fixRelativeUrls():", links)
+		return	
+	}
 }
 
 // Returns a list of urls without duplicates 
@@ -409,14 +420,25 @@ func getAllLinks(htmlString string) (urls []string) {
 	return
 }
 
-// Returns the complete html of a given uri
-func getHtmlString(uri string) (htmlString string) {
-	res, err := http.Get(uri)
-	checkError("Error in getHtmlString(), http.Get():", err, true)
+// Returns the complete html of a given uri or err if failed Get or Read call
+func getHtmlString(uri string) (htmlString string, err error) {
+	timeout := time.Duration(time.Duration(httpGetTimeout) * time.Second)
+	client := http.Client{
+		Timeout: timeout,
+	}
+	res, err := client.Get(uri)
+	checkError("Error in getHtmlString(), http.Get():", err, false)
+	if err != nil {
+		return "", err
+	}
 	html, err := ioutil.ReadAll(res.Body)
 	res.Body.Close()
-	checkError("Error in getHtmlString(), ioutil.ReadAll()", err, true)
-	htmlString = string(html[:])
+	checkError("Error in getHtmlString(), ioutil.ReadAll()", err, false)
+	if err != nil {
+		return "", err
+	} else {
+		htmlString = string(html[:])	
+	}
 	return
 }
 
@@ -427,6 +449,11 @@ func getLatency(req LatencyReq) (latency int) {
 	for i := 0; i < req.Samples; i++ {
 		latency := pingSite(req.URL)
 		latencyList = append(latencyList, latency)
+		// detected a timeout or other error
+		// consider url unresponsive, don't re-call
+		if latency == -1 {
+			break
+		}
 	}
 
 	sort.Ints(latencyList)
@@ -437,16 +464,24 @@ func getLatency(req LatencyReq) (latency int) {
 }
 
 // Pings a http.GET call and returns the time it takes in milliseconds
+// If get call returns an error of any type, including timeout 
+// returns -1 and site is assumed unresponsive
 func pingSite(uri string) (latency int) {
+	timeout := time.Duration(time.Duration(httpGetTimeout) * time.Second)
+	client := http.Client{
+		Timeout: timeout,
+	}
 	start := time.Now()
-	_, err := http.Get(uri)
+	_, err := client.Get(uri)
+	
 	elapsed := time.Since(start)
-
-	checkError("Error in pingSiteOnce(), http.Get():", err, true)
-
-	latency = int(elapsed / time.Millisecond)
-
-	return latency
+	checkError("Error in pingSiteOnce(), http.Get():", err, false)
+	if err != nil {
+		latency = -1
+	} else {
+		latency = int(elapsed / time.Millisecond)		
+	}
+	return
 }
 
 // Listens for RPC calls from the server

@@ -32,6 +32,7 @@ var (
 	serverRPCPort        string = "30000"
 	workers              []Worker
 	domainWorkerMap      map[string]Worker
+	deadDomainMap		 map[string]bool
 )
 
 type Worker struct {
@@ -119,6 +120,7 @@ func main() {
 	fmt.Println("workerIncomingIpPort:", workerIncomingIpPort, "clientIncomingIpPort:", clientIncomingIpPort)
 
 	domainWorkerMap = make(map[string]Worker)
+	deadDomainMap = make(map[string]bool)
 
 	// listens for workers joining the system
 	go listenWorkers()
@@ -185,14 +187,25 @@ func getOwner(url string) (worker Worker) {
 	return
 }
 
-// Returns the domains that a given worker is responsible for
+// Returns the live domains that a given worker is responsible for
 func getDomains(req DomainsReq) (domainsList []string) {
 	for k := range domainWorkerMap {
-		if domainWorkerMap[k].Ip == req.WorkerIP {
+		if isDomainAlive(k) {
+			if domainWorkerMap[k].Ip == req.WorkerIP {
 			domainsList = append(domainsList, k)
+			}	
 		}
+		// if domainWorkerMap[k].Ip == req.WorkerIP {
+		// 	domainsList = append(domainsList, k)
+		// }
 	}
 	return
+}
+
+// Returns true if domain is not in the deadDomainMap
+func isDomainAlive(domain string) bool {
+	_, isInDeadDomainMap := deadDomainMap[domain]
+	return !isInDeadDomainMap
 }
 
 // Returns all workerIp that have joined the server
@@ -212,7 +225,12 @@ func crawl(req CrawlReq) (workerIp string) {
 		worker = domainWorkerMap[domain]
 	} else {
 		schemeAndDomain := getSchemeAndDomain(req.URL)
-		worker = findClosestWorker(schemeAndDomain)
+		workerLatency := findClosestWorker(schemeAndDomain)
+		worker = workerLatency.Worker
+		if workerLatency.Latency == -1 {
+			deadDomainMap[domain] = true
+			fmt.Println("Dead domain map:", deadDomainMap)
+		}
 		domainWorkerMap[domain] = worker
 		fmt.Println("domainWorkerMap:", domainWorkerMap)
 	}
@@ -258,26 +276,30 @@ func getSchemeAndDomain(uri string) (schemeAndDomain string) {
 }
 
 // Compares network latencies of all workers to url, returns the closest
-func findClosestWorker(url string) (worker Worker) {
+func findClosestWorker(url string) (workerLatency WorkerLatency) {
 	var workerLatencyList []WorkerLatency
 	for _, worker := range workers {
 		latency := getLatency(worker, url)
 		fmt.Println("Worker:", worker, "says latency is:", latency)
 		workerLatencyList = append(workerLatencyList, WorkerLatency{worker, latency})
+		// site unreachable
+		if latency == -1 {
+			break
+		}
 	}
-	worker = closestWorker(workerLatencyList)
+	workerLatency = closestWorker(workerLatencyList)
 	return
 }
 
 // Returns worker with smallest previously computed network latency
-func closestWorker(workerLatencies []WorkerLatency) (worker Worker) {
-	workerLatency := workerLatencies[0]
+func closestWorker(workerLatencies []WorkerLatency) (workerLatency WorkerLatency) {
+	workerLatency = workerLatencies[0]
 	for i := 1; i < len(workerLatencies); i++ {
 		if workerLatencies[i].Latency < workerLatency.Latency {
 			workerLatency = workerLatencies[i]
 		}
 	}
-	return workerLatency.Worker
+	return workerLatency
 }
 
 // Listens for joining workers
