@@ -332,9 +332,45 @@ func parseLinks(uri string) (links []string) {
 	htmlString := getHtmlString(uri)
 	urls := getAllLinks(htmlString)
 	fmt.Println("Urls returned from getAllLinks() in parseLinks():", urls)
-	links = fixRelativeUrls(uri, urls)
+	allLinks := fixRelativeUrls(uri, urls)
+	validLinks := filterHttpAndHtmlLinks(allLinks)
+	links = eliminateDuplicates(validLinks)
 	fmt.Println("Urls after fixed with fixRelativeUrls():", links)
 	return
+}
+
+// Returns a list of urls without duplicates 
+func eliminateDuplicates(urlList []string) (linksSet []string) {
+	nonDuplicates := make(map[string]bool)
+	for _, url := range urlList {
+		nonDuplicates[url] = true
+	}
+	for key := range nonDuplicates {
+		linksSet = append(linksSet, key)
+	}
+	return
+}
+
+// Returns only http urls that end in .html 
+func filterHttpAndHtmlLinks(urlList []string) (filteredUrls []string) {
+	for _, uri := range urlList {
+		if isHttp(uri) && isDotHtml(uri) {
+			filteredUrls = append(filteredUrls, uri)
+		}
+	}
+	return
+}
+
+// Returns true if given uri ends in ".html"
+func isDotHtml(uri string) bool {
+	return strings.HasSuffix(uri, ".html")
+}
+
+// Returns true if given uri's scheme is http
+func isHttp(uri string) bool {
+	u, err := url.Parse(uri)
+	checkError("Error in isHttp(), url.Parse():", err, true)
+	return u.Scheme == "http"
 }
 
 // Turns any relative urls into complete urls
