@@ -37,7 +37,7 @@ var (
 
 // A webpage
 type Page struct {
-	// -1 if not crawled, 0 if all links set,
+	// 0 if links not crawled,
 	// greater depending on how far crawled.
 	DepthCrawled int
 	// Urls that page links to
@@ -236,7 +236,7 @@ func isVisited(url string, visited map[string]bool) bool {
 	return ok
 }
 
-// Verifies that page is in domains map
+// Verifies that page is in domains map, then crawls the page
 func initCrawl(req CrawlPageReq) {
 	fmt.Println("domains before initCrawl() processes:", domains)
 
@@ -248,7 +248,7 @@ func initCrawl(req CrawlPageReq) {
 	// make sure page exists
 	_, ok = domains[req.Domain][req.URL]
 	if !ok {
-		domains[req.Domain][req.URL] = Page{-1, nil}
+		domains[req.Domain][req.URL] = Page{0, nil}
 	}
 
 	fmt.Println("domains after initCrawl() processes:", domains)
@@ -261,8 +261,8 @@ func crawlPage(req CrawlPageReq) {
 	page := domains[req.Domain][req.URL]
 	// need to crawl deeper
 	if req.Depth > page.DepthCrawled {
-		// never crawled, so links unknown
-		if page.DepthCrawled == -1 {
+		// links unknown
+		if page.DepthCrawled == 0 {
 			page.Links = parseLinks(req.URL)
 		}
 		// previously crawled but to lesser depth
