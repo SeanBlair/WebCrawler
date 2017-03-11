@@ -1,8 +1,12 @@
 package main
 
+// Web Crawler Worker
+// Sean Blair
+// Worker program for UBC CPSC416 Assignment 5
+// http://www.cs.ubc.ca/~bestchai/teaching/cs416_2016w2/assign5/index.html
+
 import (
 	"bufio"
-	// "crypto/md5"
 	"fmt"
 	"golang.org/x/net/html"
 	"io/ioutil"
@@ -29,8 +33,8 @@ var (
 	domains map[string]map[string]Page
 	// Contains urls (keys) of pages already visited in
 	// DFS traversal of a network of pages.
-	visitedForOverlap map[string]bool		// for computeOverlap call
-	visitedForIsReachable map[string]bool	// for isReachable call
+	visitedForOverlap     map[string]bool // for computeOverlap call
+	visitedForIsReachable map[string]bool // for isReachable call
 	// Number of overlaps found so far in call to ComputeOverlap
 	numOverlapPages int
 	// seconds to wait for http Get response
@@ -84,17 +88,17 @@ type CrawlRes struct {
 // Request that server sends in RPC call to WorkerRPC.ComputeOverlap
 type ComputeOverlapReq struct {
 	FullOverlap bool
-	OwnerURL1 Worker 	// Worker to perform overlap computation
-	URL1 string 		// Site to start search of URL2's domain from
-	OwnerURL2 Worker 	// Owner of domain of URL2
-	URL2 string 		// Site to start search for entry point
-}						// of URL2's domain accessed through URL1
+	OwnerURL1   Worker // Worker to perform overlap computation
+	URL1        string // Site to start search of URL2's domain from
+	OwnerURL2   Worker // Owner of domain of URL2
+	URL2        string // Site to start search for entry point
+} // of URL2's domain accessed through URL1
 
 // Request that worker sends in WorkerRPC.IsReachable RPC call
 type IsReachableReq struct {
-	StartURL string
+	StartURL  string
 	TargetURL string
-	Domain string
+	Domain    string
 }
 
 func main() {
@@ -163,14 +167,14 @@ func computeOverlap(req ComputeOverlapReq) (numPages int) {
 	return
 }
 
-// Call Worker owner of URL to get a partial overlap 
+// Call Worker owner of URL to get a partial overlap
 func computePartialOverlap(req ComputeOverlapReq) (numPages int) {
 	request := ComputeOverlapReq{false, req.OwnerURL2, req.URL2, req.OwnerURL1, req.URL1}
 	// This worker owns domain of URL2
 	if req.OwnerURL1.Ip == req.OwnerURL2.Ip {
 		numPages = computeOverlap(request)
 	} else {
-		client, err := rpc.Dial("tcp", req.OwnerURL2.Ip + ":" + portForRPC)
+		client, err := rpc.Dial("tcp", req.OwnerURL2.Ip+":"+portForRPC)
 		checkError("rpc.Dial in computePartialOverlap()", err, true)
 		err = client.Call("WorkerRPC.ComputeOverlap", request, &numPages)
 		checkError("client.Call(WorkerRPC.ComputeOverlap in computePartialOverlap(): ", err, true)
@@ -196,7 +200,7 @@ func findEntryPoint(url1 string, thisDomain string, targetDomain string, url2 st
 					numOverlapPages++
 				} else {
 					if isLinkReachableFrom(url2, link, targetDomain, ownerUrl2Ip) {
-					numOverlapPages++
+						numOverlapPages++
 					}
 				}
 			} else {
@@ -219,9 +223,10 @@ func isLinkReachableFrom(startUrl string, targetUrl string, domain string, domai
 	}
 }
 
+// Call workers RPC, returns true if target can be reached from startUrl
 func isReachableRPC(startUrl string, targetUrl string, domain string, domainOwnerIp string) (isReachable bool) {
 	req := IsReachableReq{startUrl, targetUrl, domain}
-	client, err := rpc.Dial("tcp", domainOwnerIp + ":" + portForRPC)
+	client, err := rpc.Dial("tcp", domainOwnerIp+":"+portForRPC)
 	checkError("rpc.Dial in isReachableRPC()", err, true)
 	err = client.Call("WorkerRPC.IsReachable", req, &isReachable)
 	checkError("client.Call(WorkerRPC.IsReachable) in isReachableRPC(): ", err, true)
@@ -243,7 +248,7 @@ func isReachable(startUrl string, targetUrl string, domain string) bool {
 				continue
 			} else {
 				if isReachable(link, targetUrl, domain) {
-				return true
+					return true
 				}
 			}
 		}
@@ -287,7 +292,7 @@ func crawlPage(req CrawlPageReq) {
 			links, err := parseLinks(req.URL)
 			// Error reading page, no use to crawl deeper
 			if err != nil {
-				domains[req.Domain][req.URL] = page	
+				domains[req.Domain][req.URL] = page
 				return
 			}
 			page.Links = links
@@ -364,11 +369,11 @@ func parseLinks(uri string) (links []string, err error) {
 		validLinks := filterHttpAndHtmlLinks(allLinks)
 		links = eliminateDuplicates(validLinks)
 		fmt.Println("Urls after fixed with fixRelativeUrls():", links)
-		return	
+		return
 	}
 }
 
-// Returns a list of urls without duplicates 
+// Returns a list of urls without duplicates
 func eliminateDuplicates(urlList []string) (linksSet []string) {
 	nonDuplicates := make(map[string]bool)
 	for _, url := range urlList {
@@ -380,7 +385,7 @@ func eliminateDuplicates(urlList []string) (linksSet []string) {
 	return
 }
 
-// Returns only http urls that end in .html 
+// Returns only http urls that end in .html
 func filterHttpAndHtmlLinks(urlList []string) (filteredUrls []string) {
 	for _, uri := range urlList {
 		if isHttp(uri) && isDotHtml(uri) {
@@ -455,7 +460,7 @@ func getHtmlString(uri string) (htmlString string, err error) {
 	if err != nil {
 		return "", err
 	} else {
-		htmlString = string(html[:])	
+		htmlString = string(html[:])
 	}
 	return
 }
@@ -482,7 +487,7 @@ func getLatency(req LatencyReq) (latency int) {
 }
 
 // Pings a http.GET call and returns the time it takes in milliseconds
-// If get call returns an error of any type, including timeout 
+// If get call returns an error of any type, including timeout
 // returns -1 and site is assumed unresponsive
 func pingSite(uri string) (latency int) {
 	timeout := time.Duration(time.Duration(httpGetTimeout) * time.Second)
@@ -491,13 +496,13 @@ func pingSite(uri string) (latency int) {
 	}
 	start := time.Now()
 	_, err := client.Get(uri)
-	
+
 	elapsed := time.Since(start)
 	checkError("Error in pingSiteOnce(), http.Get():", err, false)
 	if err != nil {
 		latency = -1
 	} else {
-		latency = int(elapsed / time.Millisecond)		
+		latency = int(elapsed / time.Millisecond)
 	}
 	return
 }

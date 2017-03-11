@@ -1,5 +1,9 @@
 /*
 Implements the server in assignment 5 for UBC CS 416 2016 W2.
+http://www.cs.ubc.ca/~bestchai/teaching/cs416_2016w2/assign5/index.html
+
+Web Crawler
+Sean Blair
 
 Usage:
 
@@ -19,26 +23,34 @@ import (
 	"net/rpc"
 	"net/url"
 	"os"
-	// "strconv"
 	"strings"
-	// "time"
 )
 
 var (
+	// for workers to join the system
 	workerIncomingIpPort string
+	// for client RPC calls
 	clientIncomingIpPort string
+	// number of times to ping site in latency check
 	samplesPerWorker     int    = 5
+	// Port that workers listen to RPC calls on
 	workerRPCPort        string = "20000"
+	// Port that server listens for Worker RPC calls
 	serverRPCPort        string = "30000"
+	// All workers that have joined the system
 	workers              []Worker
+	// Maps domains to workers who are closest to them
 	domainWorkerMap      map[string]Worker
-	deadDomainMap		 map[string]bool
+	// Stores domains that are unresponsive to GET calls
+	deadDomainMap        map[string]bool
 )
 
+// A worker
 type Worker struct {
 	Ip string
 }
 
+// Contains a latency and the worker that computed it
 type WorkerLatency struct {
 	Worker  Worker
 	Latency int
@@ -92,25 +104,26 @@ type WorkerRPC int
 
 // Request that server sends in RPC call to WorkerRPC.GetLatency
 type LatencyReq struct {
-	URL     string 	// Site to compute latency of
-	Samples int   	// Number of measurents to take
+	URL     string // Site to compute latency of
+	Samples int    // Number of measurents to take
 }
 
 // Request that server sends in RPC call to WorkerRPC.CrawlPage
 type CrawlPageReq struct {
-	Domain string 	// Domain of URL
-	URL    string 	// Site to crawl
-	Depth  int 		// Depth to crawl URL
+	Domain string // Domain of URL
+	URL    string // Site to crawl
+	Depth  int    // Depth to crawl URL
 }
 
 // Request that server sends in RPC call to WorkerRPC.ComputeOverlap
 type ComputeOverlapReq struct {
 	FullOverlap bool
-	OwnerURL1 Worker 	// Worker to perform overlap computation
-	URL1 string 		// Site to start search of URL2's domain from
-	OwnerURL2 Worker 	// Owner of domain of URL2
-	URL2 string 		// Site to start search for entry point
-}						// of URL2's domain accessed through URL1
+	OwnerURL1   Worker // Worker to perform overlap computation
+	URL1        string // Site to start search of URL2's domain from
+	OwnerURL2   Worker // Owner of domain of URL2
+	URL2        string // Site to start search for entry point
+} // of URL2's domain accessed through URL1
+
 
 func main() {
 
@@ -192,8 +205,8 @@ func getDomains(req DomainsReq) (domainsList []string) {
 	for k := range domainWorkerMap {
 		if isDomainAlive(k) {
 			if domainWorkerMap[k].Ip == req.WorkerIP {
-			domainsList = append(domainsList, k)
-			}	
+				domainsList = append(domainsList, k)
+			}
 		}
 	}
 	return
