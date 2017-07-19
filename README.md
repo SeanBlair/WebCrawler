@@ -46,10 +46,10 @@ Returns the list of worker IPs connected to the server
 go run client.go -c [server ip:port] [url] [depth]
 
 Instructs the system to crawl the given url (which must start with "http://" since it only supports the http scheme). The
-worker who has the lowest latency to the given url is assigned ownership of this domain and its IP is returned after the 
-system has crawled to the appropriate depth. If depth is greater than one, the system recursively crawls any http links found
-on the given page to the appropriate depth and stores the resulting web graph with each worker owning domains that are closest
-to it in terms of network latency.
+worker who has the lowest network latency to the given url is assigned ownership of this domain and its IP is returned 
+after the system has crawled to the appropriate depth. If depth is greater than one, the system recursively crawls any 
+http links found on the given page to the appropriate depth and stores the resulting web graph with each worker owning 
+domains that are closest to it in terms of network latency.
 
 *Example* go run client.go -c localhost:2222 http://www.cs.ubc.ca/~bestchai/teaching/cs416_2016w2/assign5/index.html 3
 
